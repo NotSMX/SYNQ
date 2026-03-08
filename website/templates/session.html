@@ -8,9 +8,10 @@
     <h2 class="mb-3">{{ session.title }}</h2>
 
     <!-- GAME ELECTION (choose which game to play - not time) -->
-    <div class="mb-4 mt-2 p-3 border rounded" style="background-color: #454545; border-color: #555;">
+    <div class="mb-4 mt-2 mx-auto" style="max-width: 420px;">
+    <div class="p-3 border rounded" style="background-color: #454545; border-color: #555;">
         <h4 class="mb-1 fw-bold" style="color: #eee;">What to play?</h4>
-        <p class="small mb-2" style="color: #ccc;">Pick the game for this session (e.g. Valorant, Among Us).</p>
+        <p class="small mb-2" style="color: #ccc;">Add your preferred game. The host will choose based on highest votes.</p>
         {% if session.chosen_game %}
             <p class="mb-0 fw-bold" style="color: #fff;">We're playing: <strong>{{ session.chosen_game }}</strong></p>
             {% if is_host %}
@@ -21,15 +22,24 @@
             {% endif %}
         {% else %}
             {% if token %}
-                <form action="{{ url_for('main.vote_game', session_hash=session.hash_id) }}?token={{ token }}" method="POST" class="d-flex gap-2 mb-3 flex-wrap">
+                <form action="{{ url_for('main.vote_game', session_hash=session.hash_id) }}?token={{ token }}" method="POST" class="d-flex gap-2 mb-3 flex-wrap justify-content-center">
                     <input type="text" name="game_name" placeholder="e.g. Valorant, Among Us" value="{{ my_game_vote or '' }}" class="form-control" style="max-width: 220px;">
                     <button type="submit" class="btn btn-primary">Vote</button>
+                </form>
+            {% else %}
+                <form action="{{ url_for('main.join_and_vote', session_hash=session.hash_id) }}" method="POST" class="mb-3">
+                    <div class="d-flex flex-column gap-2 text-start">
+                        <input type="text" name="name" placeholder="Your name" required class="form-control" style="color: #333;">
+                        <input type="email" name="email" placeholder="Your email (optional)" class="form-control" style="color: #333;">
+                        <input type="text" name="game_name" placeholder="Preferred game (e.g. Valorant, Among Us)" required class="form-control" style="color: #333;">
+                        <button type="submit" class="btn btn-primary">Join & vote</button>
+                    </div>
                 </form>
             {% endif %}
             {% if game_tally %}
                 <p class="mb-1 small" style="color: #ccc;">Votes:</p>
                 <ul class="list-unstyled mb-0">
-                    {% for game_name, count in game_tally.items() %}
+                    {% for game_name, count in game_tally %}
                         <li class="d-flex align-items-center gap-2 flex-wrap">
                             <span style="color: #eee;">{{ game_name }}</span>
                             <span class="badge bg-secondary">{{ count }}</span>
@@ -47,6 +57,7 @@
             {% endif %}
         {% endif %}
     </div>
+    </div>
 
     {% if session.final_time %}
         <div class="mb-4">
@@ -62,19 +73,6 @@
         <a href="{{ url_for('main.availability', session_id=session.id, token=token) }}">Set your availability</a> (when you can play)
     </p>
     {% endif %}
-
-    <!-- JOIN SESSION -->
-    <div class="mb-4 mt-4">
-        <h4 class="mb-2">Join Session</h4>
-        <form action="{{ url_for('main.join_session', session_id=session.id) }}" method="POST"
-              class="d-flex justify-content-center gap-2 flex-wrap">
-            <input type="text" name="name" placeholder="Your Name" required
-                   class="form-control game-input" style="max-width: 300px;">
-            <input type="email" name="email" placeholder="Your Email" required
-                   class="form-control game-input" style="max-width: 300px;">
-            <button type="submit" class="btn btn-primary">Join</button>
-        </form>
-    </div>
 
     <!-- CONFIRMATION -->
     {% if session.final_time %}
@@ -127,7 +125,12 @@
     <!-- SCHEDULE -->
     <div>
         <h4 class="mb-3">Squad Schedule</h4>
-        <div id="group-calendar" style="min-height: 400px;"></div>
+        {% if token %}
+        <p class="small mb-1" style="color: #fff;">Drag on the calendar to add when you're available (or use the blue link above).</p>
+        {% endif %}
+        <div id="group-calendar" style="min-height: 450px; width: 100%;"
+             data-session-hash="{{ session.hash_id }}"
+             data-token="{{ token or '' }}"></div>
     </div>
 
     <!-- INVITE LINKS PANEL -->
@@ -175,26 +178,17 @@
 
     <!-- HOST CONTROLS -->
     {% if is_host %}
-    <div class="mt-4 p-3 border rounded bg-dark">
-        <h4 class="mb-3">Host Controls</h4>
+    <div class="mt-4 p-4 border rounded text-center" style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); border: 2px solid rgba(255,255,255,0.15); box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+        <h4 class="mb-2 fw-bold text-white" style="font-size: 1.5rem; letter-spacing: 0.05em;">HOST CONTROLS</h4>
+        <div class="mb-3 pb-2 border-bottom border-secondary" style="border-color: rgba(255,255,255,0.2) !important;"></div>
 
-        <div class="row g-3">
-            <!-- Auto Pick -->
-            <div class="col-12 col-md-6">
-                <h5 class="mb-2">Auto Pick Time</h5>
-                <a href="{{ url_for('main.auto_pick', session_hash=session.hash_id, token=participant.token) }}"
-                class="btn btn-primary w-100">
-                    Auto Pick Best Time
-                </a>
-            </div>
-
-            <!-- Manual Pick -->
-            <div class="col-12 col-md-6">
-                <h5 class="mb-2">Manual Pick</h5>
+        <div class="row g-3 justify-content-center">
+            <div class="col-12 col-md-8 col-lg-6">
+                <h5 class="mb-2 fw-bold text-white">Manual Pick Time</h5>
                 <form action="{{ url_for('main.manual_pick', session_hash=session.hash_id, token=participant.token) }}" 
-                    method="POST" class="d-flex flex-column flex-sm-row gap-2">
+                    method="POST" class="d-flex flex-column flex-sm-row gap-2 justify-content-center">
                     <input type="datetime-local" name="manual_time" required class="form-control">
-                    <button class="btn btn-success w-100 w-sm-auto">Set Time</button>
+                    <button type="submit" class="btn btn-success w-100 w-sm-auto">Set Time</button>
                 </form>
             </div>
         </div>
@@ -204,38 +198,82 @@
 </div>
 
     <script>
+    window.squadScheduleData = {{ grouped_json|tojson }};
+    window.squadScheduleToken = {{ (token or '')|tojson }};
+    window.squadScheduleHash = {{ session.hash_id|tojson }};
+    window.squadScheduleMyName = {{ (participant.name if participant else '')|tojson }};
+    </script>
+    <script>
     document.addEventListener('DOMContentLoaded', function() {
-
-        const calendarEl = document.getElementById('group-calendar');
-        const grouped = JSON.parse('{{ grouped_json|safe }}');
-        const colors = ["#3b82f6", "#ef4444", "#22c55e", "#eab308", "#a855f7", "#f97316"];
-        const events = [];
-
-        Object.keys(grouped).forEach((participant, i) => {
-            grouped[participant].forEach(block => {
-                events.push({
-                    title: participant,
-                    start: block.start,
-                    end: block.end,
-                    display: 'block',
-                    backgroundColor: colors[block.color_index % colors.length] + '80',
-                    borderColor: colors[block.color_index % colors.length],
-                    textColor: "#fff"
-                });
+        var calendarEl = document.getElementById('group-calendar');
+        if (!calendarEl) return;
+        var grouped = {};
+        try {
+            grouped = typeof window.squadScheduleData === 'string' ? JSON.parse(window.squadScheduleData) : (window.squadScheduleData || {});
+        } catch (e) {
+            grouped = {};
+        }
+        var colors = ["#3b82f6", "#ef4444", "#22c55e", "#eab308", "#a855f7", "#f97316"];
+        var events = [];
+        Object.keys(grouped).forEach(function(participantName) {
+            var blocks = grouped[participantName] || [];
+            blocks.forEach(function(block) {
+                if (block.start && block.end) {
+                    events.push({
+                        title: participantName,
+                        start: block.start,
+                        end: block.end,
+                        display: 'block',
+                        backgroundColor: colors[(block.color_index || 0) % colors.length] + 'cc',
+                        borderColor: colors[(block.color_index || 0) % colors.length],
+                        textColor: '#fff'
+                    });
+                }
             });
         });
-
-        const calendar = new FullCalendar.Calendar(calendarEl, {
+        var token = window.squadScheduleToken || '';
+        var sessionHash = window.squadScheduleHash || '';
+        var myName = window.squadScheduleMyName || 'You';
+        var canSelect = !!token;
+        var calendar = new FullCalendar.Calendar(calendarEl, {
             initialView: 'timeGridWeek',
             height: 500,
-            slotMinTime: "08:00:00",
-            slotMaxTime: "23:00:00",
+            slotMinTime: '06:00:00',
+            slotMaxTime: '24:00:00',
+            headerToolbar: { left: 'prev,next today', center: 'title', right: 'timeGridWeek,timeGridDay' },
             events: events,
-            nowIndicator: false
+            nowIndicator: true,
+            selectable: canSelect,
+            selectMirror: canSelect,
+            select: function(info) {
+                if (!canSelect || !sessionHash || !token) return;
+                var startStr = info.start.toISOString ? info.start.toISOString() : info.startStr;
+                var endStr = info.end.toISOString ? info.end.toISOString() : info.endStr;
+                var formData = new FormData();
+                formData.append('token', token);
+                formData.append('start', startStr);
+                formData.append('end', endStr);
+                fetch('/session/' + sessionHash + '/add_availability', {
+                    method: 'POST',
+                    body: formData,
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                }).then(function(res) {
+                    if (res.ok || res.redirected) {
+                        calendar.addEvent({
+                            title: myName,
+                            start: info.start,
+                            end: info.end,
+                            display: 'block',
+                            backgroundColor: colors[0] + 'cc',
+                            borderColor: colors[0],
+                            textColor: '#fff'
+                        });
+                    }
+                }).catch(function() {});
+            }
         });
-
         calendar.render();
     });
-</script>
+    </script>
 
 {% endblock %}

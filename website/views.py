@@ -54,6 +54,7 @@ def _ensure_game_election_schema():
             ("session", "host_id", "INTEGER"),
             ("session", "final_time", "DATETIME"),
             ("session", "chosen_game", "VARCHAR(120)"),
+            ("session", "is_public", "INTEGER"),
             ("availability", "participant_id", "INTEGER"),
             ("availability", "session_id", "INTEGER"),
             ("availability", "start_time", "DATETIME"),
@@ -137,9 +138,10 @@ def join_session(session_id):
         game_session.host_id = participant.id
         db.session.commit()
 
+    # Send to session page so they can vote for preferred game, then use "Set your availability" link
     return redirect(url_for(
-        "main.availability",
-        session_id=session_id,
+        "main.view_session",
+        session_hash=game_session.hash_id,
         token=participant.token
     ))
 
@@ -149,23 +151,40 @@ def availability(session_id, token):
     participant = Participant.query.filter_by(session_id=session_id, token=token).first_or_404()
 
     if request.method == 'POST':
-        data = json.loads(request.form['availability_data'])
+        raw = request.form.get('availability_data', '[]')
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            data = []
+        if not isinstance(data, list):
+            data = []
+
+        def parse_iso(s):
+            if not s:
+                return None
+            s = str(s).strip().replace('Z', '+00:00')
+            try:
+                return datetime.fromisoformat(s)
+            except ValueError:
+                return None
+
+        # Replace existing availability for this participant in this session
+        Availability.query.filter_by(session_id=session_id, participant_id=participant.id).delete()
 
         for block in data:
-            start = datetime.fromisoformat(block['start'])
-            end = datetime.fromisoformat(block['end'])
-
-            new_availability = Availability(
+            start = parse_iso(block.get('start'))
+            end = parse_iso(block.get('end'))
+            if start is None or end is None or start >= end:
+                continue
+            db.session.add(Availability(
                 session_id=session_id,
                 participant_id=participant.id,
                 start_time=start,
                 end_time=end
-            )
-
-            db.session.add(new_availability)
+            ))
 
         db.session.commit()
-
+        flash("Availability saved.", "success")
         return redirect(url_for(
             'main.view_session',
             session_hash=participant.session.hash_id,
@@ -195,6 +214,8 @@ def view_session(session_hash):
         grouped[p] = p.availabilities  # for name display in HTML
         grouped_json[p.name] = []
         for block in p.availabilities:
+            if block.start_time is None or block.end_time is None:
+                continue
             grouped_json[p.name].append({
                 "start": block.start_time.isoformat(),
                 "end": block.end_time.isoformat(),
@@ -207,15 +228,20 @@ def view_session(session_hash):
         conf = Confirmation.query.filter_by(participant_id=p.id, session_id=game_session.id).first()
         confirmations[p.id] = conf.status if conf else None
 
-    # Game election: tally votes by game name, current participant's vote
+    # Game election: tally votes by game name (case-insensitive), current participant's vote
     game_votes_raw = GameVote.query.filter_by(session_id=game_session.id).all()
-    game_tally = defaultdict(int)
+    # key = normalized (lowercase), value = (display_name = first seen, count)
+    tally_by_key = {}
     my_game_vote = None
     for v in game_votes_raw:
-        game_tally[v.game_name.strip() or "(empty)"] += 1
+        raw = (v.game_name or "").strip() or "(empty)"
+        key = raw.lower()
+        if key not in tally_by_key:
+            tally_by_key[key] = [raw, 0]
+        tally_by_key[key][1] += 1
         if participant and v.participant_id == participant.id:
             my_game_vote = v.game_name
-    game_tally = dict(sorted(game_tally.items(), key=lambda x: -x[1]))
+    game_tally = sorted(tally_by_key.values(), key=lambda x: -x[1])  # list of (display_name, count)
 
     return render_template(
         'session.html',
@@ -258,9 +284,10 @@ def auto_pick(session_hash):
         session_obj.final_time = best_time
         db.session.commit()
     
-    # Notify participants
+    # Notify participants (only when mail is configured)
     sent_count, failed = notify_final_time(session_obj)
-    flash(f"Emails sent successfully to {sent_count} participant(s).", "success")
+    if sent_count > 0:
+        flash(f"Emails sent successfully to {sent_count} participant(s).", "success")
     if failed:
         for name, reason in failed:
             flash(f"Failed to send email to {name}: {reason}", "danger")
@@ -282,9 +309,10 @@ def manual_pick(session_hash):
     session_obj.final_time = manual_time
     db.session.commit()
     
-    # Notify participants
+    # Notify participants (only when mail is configured)
     sent_count, failed = notify_final_time(session_obj)
-    flash(f"Emails sent successfully to {sent_count} participant(s).", "success")
+    if sent_count > 0:
+        flash(f"Emails sent successfully to {sent_count} participant(s).", "success")
     if failed:
         for name, reason in failed:
             flash(f"Failed to send email to {name}: {reason}", "danger")
@@ -316,6 +344,32 @@ def confirm(session_id, token):
     return redirect(url_for("main.view_session", session_hash=participant.session.hash_id, token=token))
 
 
+@main.route("/session/<session_hash>/join_and_vote", methods=["POST"])
+def join_and_vote(session_hash):
+    """For visitors without a token (public link): join the session and submit preferred game in one step."""
+    game_session = Session.query.filter_by(hash_id=session_hash).first_or_404()
+    name = (request.form.get("name") or "").strip()
+    email = (request.form.get("email") or "").strip()
+    game_name = (request.form.get("game_name") or "").strip()
+    if not name:
+        flash("Please enter your name.", "warning")
+        return redirect(url_for("main.view_session", session_hash=session_hash))
+    if not game_name:
+        flash("Please enter your preferred game.", "warning")
+        return redirect(url_for("main.view_session", session_hash=session_hash))
+    participant = Participant(name=name, email=email or None, session_id=game_session.id)
+    db.session.add(participant)
+    db.session.commit()
+    if not game_session.host_id:
+        game_session.host_id = participant.id
+        db.session.commit()
+    vote = GameVote(session_id=game_session.id, participant_id=participant.id, game_name=game_name)
+    db.session.add(vote)
+    db.session.commit()
+    flash("Thanks! Your vote was added.", "success")
+    return redirect(url_for("main.view_session", session_hash=session_hash, token=participant.token))
+
+
 @main.route("/session/<session_hash>/vote_game", methods=["POST"])
 def vote_game(session_hash):
     game_session = Session.query.filter_by(hash_id=session_hash).first_or_404()
@@ -333,6 +387,39 @@ def vote_game(session_hash):
         db.session.add(vote)
     db.session.commit()
     flash("Vote saved.", "success")
+    return redirect(url_for("main.view_session", session_hash=session_hash, token=token))
+
+
+@main.route("/session/<session_hash>/add_availability", methods=["POST"])
+def add_availability_from_calendar(session_hash):
+    """Add one availability block from the Squad Schedule calendar (click/drag on session page)."""
+    game_session = Session.query.filter_by(hash_id=session_hash).first_or_404()
+    token = request.form.get("token")
+    participant = Participant.query.filter_by(session_id=game_session.id, token=token).first_or_404()
+    start_str = (request.form.get("start") or "").strip()
+    end_str = (request.form.get("end") or "").strip()
+    if not start_str or not end_str:
+        flash("Missing start or end time.", "warning")
+        return redirect(url_for("main.view_session", session_hash=session_hash, token=token))
+    start_str = start_str.replace("Z", "+00:00")
+    end_str = end_str.replace("Z", "+00:00")
+    try:
+        start_dt = datetime.fromisoformat(start_str)
+        end_dt = datetime.fromisoformat(end_str)
+    except ValueError:
+        flash("Invalid time format.", "warning")
+        return redirect(url_for("main.view_session", session_hash=session_hash, token=token))
+    if start_dt >= end_dt:
+        flash("End must be after start.", "warning")
+        return redirect(url_for("main.view_session", session_hash=session_hash, token=token))
+    db.session.add(Availability(
+        session_id=game_session.id,
+        participant_id=participant.id,
+        start_time=start_dt,
+        end_time=end_dt,
+    ))
+    db.session.commit()
+    flash("Availability added.", "success")
     return redirect(url_for("main.view_session", session_hash=session_hash, token=token))
 
 

@@ -4,11 +4,36 @@
 <h2 class="mb-4">Select Your Availability</h2>
 
 <div class="panel">
-    <div id="calendar"></div>
+    <p class="text-muted small mb-3">Add the times when you're available. Pick a date and start/end time, then click "Add block". Add as many as you need, then Submit.</p>
+
+    <div class="mb-4 p-3 border rounded bg-light">
+        <h5 class="mb-2">Add a time block</h5>
+        <div class="d-flex flex-wrap gap-2 align-items-end">
+            <div>
+                <label class="form-label small mb-0">Date</label>
+                <input type="date" id="blockDate" class="form-control" required>
+            </div>
+            <div>
+                <label class="form-label small mb-0">Start</label>
+                <input type="time" id="blockStart" class="form-control" value="18:00" required>
+            </div>
+            <div>
+                <label class="form-label small mb-0">End</label>
+                <input type="time" id="blockEnd" class="form-control" value="21:00" required>
+            </div>
+            <button type="button" id="addBlockBtn" class="btn btn-primary">Add block</button>
+        </div>
+    </div>
+
+    <div class="mb-3">
+        <h5 class="mb-2">Your blocks</h5>
+        <ul id="blocksList" class="list-group list-group-flush"></ul>
+        <p id="noBlocks" class="text-muted small mb-0">No blocks yet. Add one above.</p>
+    </div>
 
     <form method="POST" id="availabilityForm">
-        <input type="hidden" name="availability_data" id="availabilityData">
-        <button type="submit" class="btn btn-primary">
+        <input type="hidden" name="availability_data" id="availabilityData" value="[]">
+        <button type="submit" class="btn btn-primary" id="submitBtn" disabled>
             Submit Availability
         </button>
     </form>
@@ -16,42 +41,65 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    var blocks = [];
+    var listEl = document.getElementById('blocksList');
+    var noBlocksEl = document.getElementById('noBlocks');
+    var submitBtn = document.getElementById('submitBtn');
 
-    let availabilityBlocks = [];
+    function setDefaultDate() {
+        var d = new Date();
+        document.getElementById('blockDate').value = d.toISOString().slice(0, 10);
+    }
+    setDefaultDate();
 
-    var calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
-        initialView: 'timeGridWeek',
-        selectable: true,
-        editable: true,
-        nowIndicator: true,
-        height: 650,
-
-        select: function(info) {
-            let event = {
-                title: "Available",
-                start: info.startStr,
-                end: info.endStr
+    function updateList() {
+        listEl.innerHTML = '';
+        blocks.forEach(function(b, i) {
+            var li = document.createElement('li');
+            li.className = 'list-group-item d-flex justify-content-between align-items-center';
+            li.textContent = b.date + ' ' + b.display;
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'btn btn-outline-danger btn-sm';
+            btn.textContent = 'Remove';
+            btn.dataset.index = i;
+            btn.onclick = function() {
+                blocks.splice(parseInt(this.dataset.index), 1);
+                updateList();
             };
+            li.appendChild(btn);
+            listEl.appendChild(li);
+        });
+        noBlocksEl.style.display = blocks.length ? 'none' : 'block';
+        submitBtn.disabled = blocks.length === 0;
+    }
 
-            availabilityBlocks.push(event);
-            calendar.addEvent(event);
-        },
-
-        eventClick: function(info) {
-            info.event.remove();
-            availabilityBlocks = availabilityBlocks.filter(e =>
-                e.start !== info.event.startStr
-            );
+    document.getElementById('addBlockBtn').onclick = function() {
+        var date = document.getElementById('blockDate').value;
+        var start = document.getElementById('blockStart').value;
+        var end = document.getElementById('blockEnd').value;
+        if (!date || !start || !end) return;
+        if (start >= end) {
+            alert('End time must be after start time.');
+            return;
         }
-    });
+        var startStr = date + 'T' + start + ':00';
+        var endStr = date + 'T' + end + ':00';
+        blocks.push({
+            start: startStr,
+            end: endStr,
+            date: date,
+            display: start + ' – ' + end
+        });
+        updateList();
+    };
 
-    calendar.render();
+    document.getElementById('availabilityForm').onsubmit = function() {
+        var data = blocks.map(function(b) { return { start: b.start, end: b.end }; });
+        document.getElementById('availabilityData').value = JSON.stringify(data);
+    };
 
-    document.getElementById("availabilityForm").addEventListener("submit", function() {
-        document.getElementById("availabilityData").value =
-            JSON.stringify(availabilityBlocks);
-    });
-
+    updateList();
 });
 </script>
 

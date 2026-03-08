@@ -1,10 +1,14 @@
 from flask_mail import Message
-from flask import url_for
+from flask import url_for, current_app
 from website import mail
 
 def notify_final_time(session):
     sent_count = 0
     failed = []
+
+    # Skip sending when mail is not configured (no credentials)
+    if not (current_app.config.get("MAIL_USERNAME") and current_app.config.get("MAIL_PASSWORD")):
+        return 0, []
 
     for participant in session.participants:
         confirm_url = url_for(
