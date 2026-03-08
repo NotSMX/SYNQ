@@ -235,7 +235,7 @@ def test_join_session_sets_host(client, app):
     assert res.status_code == 302
 
     with app.app_context():
-        updated = Session.query.get(session_id)
+        updated = db.session.get(Session, session_id)
         assert updated.host_id is not None
 
 
@@ -503,3 +503,86 @@ def test_confirm_multiple_updates(client, sample_session, app):
         follow_redirects=True
     )
     assert res.status_code == 200
+
+
+def test_reset_db(client):
+    """POST /reset-db should drop and recreate tables and redirect."""
+    res = client.post("/reset-db", follow_redirects=True)
+    assert res.status_code == 200
+
+
+def test_availability_data(client, sample_session, app):
+    """GET /session/<hash>/availability_data should return JSON with participant blocks."""
+    with app.app_context():
+        a = Availability(
+            session_id=sample_session["session_id"],
+            participant_id=sample_session["host_id"],
+            start_time=datetime.now(),
+            end_time=datetime.now() + timedelta(hours=1)
+        )
+        db.session.add(a)
+        db.session.commit()
+
+    res = client.get(
+        f"/session/{sample_session['session_hash']}/availability_data",
+        headers={"X-Requested-With": "XMLHttpRequest"}
+    )
+    assert res.status_code == 200
+    data = res.get_json()
+    assert isinstance(data, dict)
+    assert "Host" in data
+    assert len(data["Host"]) == 1
+
+
+def test_remove_availability(client, sample_session, app):
+    """Removing an existing availability block should succeed."""
+    start = datetime.now()
+    end = start + timedelta(hours=1)
+
+    with app.app_context():
+        a = Availability(
+            session_id=sample_session["session_id"],
+            participant_id=sample_session["host_id"],
+            start_time=start,
+            end_time=end
+        )
+        db.session.add(a)
+        db.session.commit()
+
+    res = client.post(
+        f"/session/{sample_session['session_hash']}/remove_availability",
+        data={
+            "token": sample_session["host_token"],
+            "start": start.isoformat(),
+            "end": end.isoformat()
+        },
+        headers={"X-Requested-With": "XMLHttpRequest"}
+    )
+    assert res.status_code == 200
+    assert res.get_json()["ok"] is True
+
+
+def test_remove_availability_not_found(client, sample_session):
+    """Removing a non-existent block should return ok: False."""
+    res = client.post(
+        f"/session/{sample_session['session_hash']}/remove_availability",
+        data={
+            "token": sample_session["host_token"],
+            "start": datetime.now().isoformat(),
+            "end": (datetime.now() + timedelta(hours=1)).isoformat()
+        },
+        headers={"X-Requested-With": "XMLHttpRequest"}
+    )
+    assert res.status_code == 400
+    assert res.get_json()["ok"] is False
+
+
+def test_remove_availability_missing_fields(client, sample_session):
+    """Remove with missing start/end should return ok: False."""
+    res = client.post(
+        f"/session/{sample_session['session_hash']}/remove_availability",
+        data={"token": sample_session["host_token"]},
+        headers={"X-Requested-With": "XMLHttpRequest"}
+    )
+    assert res.status_code == 400
+    assert res.get_json()["ok"] is False
