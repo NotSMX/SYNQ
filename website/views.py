@@ -6,6 +6,8 @@ Create Session → Join → Submit Availability → Auto Pick → Confirm
 """
 # pylint: disable=cyclic-import
 import json
+import hashlib, time
+from flask import Response, stream_with_context
 from datetime import datetime
 
 from flask import Blueprint, current_app, render_template, redirect, url_for, request, flash, jsonify
@@ -619,15 +621,231 @@ def remove_availability_from_calendar(session_hash):
     ))
 
 
-@main.route("/session/<session_hash>/availability_data")
-def availability_data(session_hash):
-    """Return live availability data as JSON for calendar polling."""
+# @main.route("/session/<session_hash>/availability_data")
+# def availability_data(session_hash):
+#     """Return live availability data as JSON for calendar polling."""
+#     game_session = Session.query.filter_by(hash_id=session_hash).first_or_404()
+#     grouped_json = {
+#         p.name: [
+#             {"start": b.start_time.isoformat(), "end": b.end_time.isoformat()}
+#             for b in p.availabilities if b.start_time and b.end_time
+#         ]
+#         for p in game_session.participants
+#     }
+#     return jsonify(grouped_json)
+
+def _session_state_hash(game_session):
+    """
+    Return a short hash that changes whenever any meaningful session state changes:
+    availability blocks, game votes, chosen game, final time, confirmations,
+    or the participant list itself.
+
+    This is used by the SSE stream to decide whether to push an update.
+    Cheap to compute — no extra DB queries beyond what's already loaded.
+    """
+    import hashlib  # noqa: PLC0415
+
+    parts = []
+
+    # Participant list + their availability
+    for p in sorted(game_session.participants, key=lambda x: x.id):
+        parts.append(f"p:{p.id}:{p.name}")
+        for b in sorted(p.availabilities, key=lambda x: (x.start_time, x.end_time)):
+            if b.start_time and b.end_time:
+                parts.append(f"a:{b.start_time.isoformat()}:{b.end_time.isoformat()}")
+
+    # Game votes
+    from website.models import GameVote, Confirmation  # noqa: PLC0415
+    from website import db  # noqa: PLC0415
+
+    votes = GameVote.query.filter_by(session_id=game_session.id).order_by(
+        GameVote.participant_id
+    ).all()
+    for v in votes:
+        parts.append(f"v:{v.participant_id}:{v.game_name}")
+
+    # Chosen game + final time
+    parts.append(f"cg:{game_session.chosen_game}")
+    parts.append(f"ft:{game_session.final_time}")
+
+    # Confirmations
+    confs = Confirmation.query.filter_by(session_id=game_session.id).order_by(
+        Confirmation.participant_id
+    ).all()
+    for c in confs:
+        parts.append(f"c:{c.participant_id}:{c.status}")
+
+    return hashlib.md5("|".join(parts).encode()).hexdigest()[:12]
+
+
+# ── Route 1: lightweight JSON state endpoint (replaces availability_data) ─────
+
+@main.route("/session/<session_hash>/state")
+def session_state(session_hash):
+    """
+    Return full live session state as JSON.
+    Replaces /availability_data — now includes game tally, chosen game,
+    final time, confirmations, and participant list alongside availability.
+    """
+    from flask import jsonify  # already imported in views.py  # noqa: PLC0415
+    from website.models import GameVote, Confirmation  # noqa: PLC0415
+
     game_session = Session.query.filter_by(hash_id=session_hash).first_or_404()
-    grouped_json = {
+
+    availability = {
         p.name: [
             {"start": b.start_time.isoformat(), "end": b.end_time.isoformat()}
-            for b in p.availabilities if b.start_time and b.end_time
+            for b in p.availabilities
+            if b.start_time and b.end_time
         ]
         for p in game_session.participants
     }
-    return jsonify(grouped_json)
+
+    votes = GameVote.query.filter_by(session_id=game_session.id).all()
+    tally: dict = {}
+    for v in votes:
+        key = (v.game_name or "").strip().lower()
+        display = (v.game_name or "").strip()
+        tally[key] = {"name": display, "count": tally.get(key, {}).get("count", 0) + 1}
+    game_tally = sorted(tally.values(), key=lambda x: -x["count"])
+
+    confs = Confirmation.query.filter_by(session_id=game_session.id).all()
+    conf_map = {}
+    for c in confs:
+        p = next(
+            (x for x in game_session.participants if x.id == c.participant_id), None
+        )
+        if p:
+            conf_map[p.name] = c.status
+
+    return jsonify({
+        "availability": availability,
+        "game_tally": game_tally,
+        "chosen_game": game_session.chosen_game,
+        "final_time": (
+            game_session.final_time.isoformat() if game_session.final_time else None
+        ),
+        "confirmations": conf_map,
+        "participants": [p.name for p in game_session.participants],
+        "state_hash": _session_state_hash(game_session),
+    })
+
+
+# ── Route 2: SSE stream ────────────────────────────────────────────────────────
+
+@main.route("/session/<session_hash>/stream")
+def stream_session(session_hash):
+    """
+    Server-Sent Events endpoint.
+
+    The client connects once; the server pushes a 'state' event whenever
+    the session changes (availability, votes, confirmations, chosen game,
+    final time). Falls back gracefully if the session disappears.
+
+    Poll interval: 2 s while tab is visible, client should pause when hidden.
+    Each event is the full JSON payload from session_state so the client
+    only needs one handler.
+    """
+    import time  # noqa: PLC0415
+    import hashlib  # noqa: PLC0415
+    from flask import Response, stream_with_context  # noqa: PLC0415
+    from website import db  # noqa: PLC0415
+
+    POLL_INTERVAL = 2      # seconds between DB checks
+    KEEPALIVE_EVERY = 15   # seconds — send a comment to prevent proxy timeouts
+    MAX_DURATION = 300     # 5 min — client will auto-reconnect via EventSource
+
+    def generate():
+        import json as _json  # noqa: PLC0415
+        from website.models import Session as S  # noqa: PLC0415
+
+        last_hash = None
+        last_keepalive = time.time()
+        start = time.time()
+
+        while time.time() - start < MAX_DURATION:
+            try:
+                # Re-query inside app context; expire cached objects so we see
+                # fresh data from other workers/processes.
+                db.session.expire_all()
+                gs = S.query.filter_by(hash_id=session_hash).first()
+                if gs is None:
+                    yield "event: gone\ndata: {}\n\n"
+                    return
+
+                current_hash = _session_state_hash(gs)
+
+                if current_hash != last_hash:
+                    last_hash = current_hash
+
+                    avail = {
+                        p.name: [
+                            {
+                                "start": b.start_time.isoformat(),
+                                "end": b.end_time.isoformat(),
+                            }
+                            for b in p.availabilities
+                            if b.start_time and b.end_time
+                        ]
+                        for p in gs.participants
+                    }
+
+                    from website.models import GameVote, Confirmation  # noqa: PLC0415
+
+                    votes = GameVote.query.filter_by(session_id=gs.id).all()
+                    tally: dict = {}
+                    for v in votes:
+                        key = (v.game_name or "").strip().lower()
+                        display = (v.game_name or "").strip()
+                        tally[key] = {
+                            "name": display,
+                            "count": tally.get(key, {}).get("count", 0) + 1,
+                        }
+                    game_tally = sorted(tally.values(), key=lambda x: -x["count"])
+
+                    confs = Confirmation.query.filter_by(session_id=gs.id).all()
+                    conf_map = {}
+                    for c in confs:
+                        p = next(
+                            (x for x in gs.participants if x.id == c.participant_id),
+                            None,
+                        )
+                        if p:
+                            conf_map[p.name] = c.status
+
+                    payload = _json.dumps({
+                        "availability": avail,
+                        "game_tally": game_tally,
+                        "chosen_game": gs.chosen_game,
+                        "final_time": (
+                            gs.final_time.isoformat() if gs.final_time else None
+                        ),
+                        "confirmations": conf_map,
+                        "participants": [p.name for p in gs.participants],
+                        "state_hash": current_hash,
+                    })
+                    yield f"event: state\ndata: {payload}\n\n"
+
+                # Keepalive comment so proxies don't close the connection
+                if time.time() - last_keepalive >= KEEPALIVE_EVERY:
+                    yield ": keepalive\n\n"
+                    last_keepalive = time.time()
+
+            except Exception:  # pylint: disable=broad-exception-caught
+                # Don't crash the stream on transient DB errors
+                yield ": error\n\n"
+
+            time.sleep(POLL_INTERVAL)
+
+        # Tell client to reconnect (EventSource does this automatically)
+        yield "event: reconnect\ndata: {}\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",   # disables Nginx buffering
+            "Connection": "keep-alive",
+        },
+    )
