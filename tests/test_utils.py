@@ -37,21 +37,19 @@ def sample_session():
         """Minimal participant stub."""
 
         def __init__(self, name, email, token):
-            """Initialise with name, email and token."""
             self.name = name
             self.email = email
             self.token = token
 
         def __repr__(self):
-            """Return string representation."""
             return f"FakeParticipant({self.name})"
 
     class FakeSession:
         """Minimal session stub."""
 
         def __init__(self):
-            """Initialise with default test values."""
             self.id = 1
+            self.hash_id = "testhash123"
             self.title = "Test Session"
             self.final_time = datetime.now(timezone.utc) + timedelta(days=1)
             self.participants = [
@@ -60,7 +58,6 @@ def sample_session():
             ]
 
         def __repr__(self):
-            """Return string representation."""
             return f"FakeSession({self.title})"
 
     return FakeSession()
@@ -140,6 +137,7 @@ def test_notify_skips_no_email(monkeypatch):
         """Session stub with one emailless participant."""
         def __init__(self):
             self.id = 1
+            self.hash_id = "testhash123"
             self.title = "Test"
             self.final_time = datetime.now(timezone.utc)
             self.participants = [FakeParticipant()]
