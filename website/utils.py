@@ -24,9 +24,9 @@ def notify_final_time(session):
     for participant in session.participants:
         if not (participant.email and participant.email.strip()):
             continue
-        confirm_url = url_for(
-            "main.confirm",
-            session_id=session.id,
+        session_url = url_for(
+            "main.view_session",
+            session_hash=session.hash_id,
             token=participant.token,
             _external=True,
         )
@@ -37,7 +37,7 @@ def notify_final_time(session):
                 f"Hi {participant.name},\n\n"
                 f"The final time for '{session.title}' has been set to "
                 f"{session.final_time.strftime('%A, %B %d, %Y at %I:%M %p')}.\n"
-                f"Confirm your availability here:\n{confirm_url}\n\nThanks!"
+                f"View the session here:\n{session_url}\n\nThanks!"
             ),
         )
         try:
