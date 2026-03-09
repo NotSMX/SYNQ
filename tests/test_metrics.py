@@ -5,6 +5,8 @@ Unit tests for website/metrics.py
 """
 
 # pylint: disable=redefined-outer-name
+# pylint: disable=unused-argument
+# pylint: disable=unused-variable
 
 from datetime import datetime, timedelta, timezone
 
@@ -24,11 +26,18 @@ def app():
         "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
         "SQLALCHEMY_EXPIRE_ON_COMMIT": False
     })
-    with flask_app.app_context():
-        db.create_all()
-        yield flask_app
-        db.session.remove()
-        db.drop_all()
+    ctx = flask_app.app_context()
+    ctx.push()
+
+    db.create_all()
+
+    yield flask_app
+
+    db.session.remove()
+    db.drop_all()
+    db.engine.dispose()
+
+    ctx.pop()
 
 
 @pytest.fixture
@@ -182,3 +191,75 @@ def test_calculate_metrics_handles_query_failure(monkeypatch, app):
     with app.app_context():
         metrics = calculate_metrics()
     assert metrics["sessions_created"] == 0
+
+
+
+def test_metrics_confirmed_keys_db_error(monkeypatch, app):
+    """calculate_metrics should return 0 confirmed when confirmed keys query fails."""
+    from sqlalchemy.exc import SQLAlchemyError  # pylint: disable=import-outside-toplevel
+
+    def broken(*args, **kwargs):
+        raise SQLAlchemyError("fail")
+
+    monkeypatch.setattr("website.metrics.db.session.query", broken)
+    with app.app_context():
+        metrics = calculate_metrics()
+    assert metrics["confirmed_participants"] == 0
+
+
+def test_metrics_activation_rate_db_error(monkeypatch, app):
+    """calculate_metrics should return 0% activation when host query fails."""
+    from sqlalchemy.exc import SQLAlchemyError  # pylint: disable=import-outside-toplevel
+
+    original_query = None
+
+    class BrokenOnFilter:
+        """Stub that passes count() but fails on filter()."""
+        def count(self):
+            """Return 0."""
+            return 0
+        def filter(self, *args, **kwargs):
+            """Raise error."""
+            raise SQLAlchemyError("fail")
+        def filter_by(self, **kwargs):
+            """Return empty list."""
+            return self
+        def all(self):
+            """Return empty list."""
+            return []
+
+    monkeypatch.setattr("website.metrics.Session.query", BrokenOnFilter())
+    with app.app_context():
+        metrics = calculate_metrics()
+    assert metrics["activation_rate"] == "0%"
+
+
+def test_metrics_repeat_usage_db_error(monkeypatch, app):
+    """calculate_metrics should return 0% repeat usage when session query fails."""
+    from sqlalchemy.exc import SQLAlchemyError  # pylint: disable=import-outside-toplevel
+
+    class BrokenOnFilterBy:
+        """Stub that passes count() but fails on filter_by()."""
+        def count(self):
+            """Return 0."""
+            return 0
+        def filter(self, *args, **kwargs):
+            """Return self."""
+            return self
+        def with_entities(self, *args, **kwargs):
+            """Return self."""
+            return self
+        def distinct(self):
+            """Return self."""
+            return self
+        def all(self):
+            """Return empty."""
+            return []
+        def filter_by(self, **kwargs):
+            """Raise error."""
+            raise SQLAlchemyError("fail")
+
+    monkeypatch.setattr("website.metrics.Session.query", BrokenOnFilterBy())
+    with app.app_context():
+        metrics = calculate_metrics()
+    assert metrics["repeat_usage"] == "0%"

@@ -3,7 +3,6 @@ test_views.py
 
 This module contains unit tests for the Flask views in the website/views.py module.
 """
-
 # pylint: disable=redefined-outer-name
 # pylint: disable=cyclic-import
 # pylint: disable=duplicate-code
@@ -586,3 +585,109 @@ def test_remove_availability_missing_fields(client, sample_session):
     )
     assert res.status_code == 400
     assert res.get_json()["ok"] is False
+
+
+def test_auto_pick_unauthorized_host(client, sample_session, app):
+    """Auto pick by non-host should return 403."""
+    with app.app_context():
+        p = Participant(name="Other", email="o@o.com", session_id=sample_session["session_id"])
+        db.session.add(p)
+        db.session.commit()
+        other_token = p.token
+    res = client.get(
+        f"/auto_pick/{sample_session['session_hash']}?token={other_token}"
+    )
+    assert res.status_code == 403
+
+
+def test_manual_pick_unauthorized_host(client, sample_session, app):
+    """Manual pick by non-host should return 403."""
+    with app.app_context():
+        p = Participant(name="Other", email="o@o.com", session_id=sample_session["session_id"])
+        db.session.add(p)
+        db.session.commit()
+        other_token = p.token
+    res = client.post(
+        f"/manual_pick/{sample_session['session_hash']}?token={other_token}",
+        data={"manual_time": datetime.now().isoformat()}
+    )
+    assert res.status_code == 403
+
+
+def test_remove_availability_invalid_time(client, sample_session):
+    """Remove with invalid time strings should return 400."""
+    res = client.post(
+        f"/session/{sample_session['session_hash']}/remove_availability",
+        data={"token": sample_session["host_token"], "start": "bad", "end": "bad"},
+        headers={"X-Requested-With": "XMLHttpRequest"}
+    )
+    assert res.status_code == 400
+
+
+def test_add_availability_non_xhr(client, sample_session):
+    """add_availability without XHR header should redirect on success."""
+    start = datetime.now().isoformat()
+    end = (datetime.now() + timedelta(hours=1)).isoformat()
+    res = client.post(
+        f"/session/{sample_session['session_hash']}/add_availability",
+        data={"token": sample_session["host_token"], "start": start, "end": end},
+    )
+    assert res.status_code == 302
+
+
+def test_remove_availability_non_xhr(client, sample_session, app):
+    """remove_availability without XHR header should redirect on success."""
+    start = datetime.now()
+    end = start + timedelta(hours=1)
+    with app.app_context():
+        a = Availability(
+            session_id=sample_session["session_id"],
+            participant_id=sample_session["host_id"],
+            start_time=start, end_time=end
+        )
+        db.session.add(a)
+        db.session.commit()
+    res = client.post(
+        f"/session/{sample_session['session_hash']}/remove_availability",
+        data={
+            "token": sample_session["host_token"],
+            "start": start.isoformat(),
+            "end": end.isoformat()
+        }
+    )
+    assert res.status_code == 302
+
+
+def test_availability_data_empty(client, sample_session):
+    """availability_data with no blocks should return empty lists."""
+    res = client.get(f"/session/{sample_session['session_hash']}/availability_data")
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["Host"] == []
+
+
+def test_auto_pick_no_overlap(client, sample_session, monkeypatch, app):
+    """Auto pick with non-overlapping availability should flash warning."""
+    with app.app_context():
+        p2 = Participant(name="P2", email="p2@test.com", session_id=sample_session["session_id"])
+        db.session.add(p2)
+        db.session.commit()
+        now = datetime.now()
+        db.session.add(Availability(
+            session_id=sample_session["session_id"],
+            participant_id=sample_session["host_id"],
+            start_time=now, end_time=now + timedelta(hours=1)
+        ))
+        db.session.add(Availability(
+            session_id=sample_session["session_id"],
+            participant_id=p2.id,
+            start_time=now + timedelta(hours=5),
+            end_time=now + timedelta(hours=6)
+        ))
+        db.session.commit()
+    monkeypatch.setattr("website.views.notify_final_time", lambda s: (0, []))
+    res = client.get(
+        f"/auto_pick/{sample_session['session_hash']}?token={sample_session['host_token']}",
+        follow_redirects=True
+    )
+    assert res.status_code == 200
