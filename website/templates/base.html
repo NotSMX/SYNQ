@@ -13,6 +13,20 @@
     <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='img/favicon.ico.png') }}">
     <script src='https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.js'></script>
 </head>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    setTimeout(function () {
+      if (!localStorage.getItem('disclosureSeen')) {
+        var modalEl = document.getElementById('policyModal');
+        var modal = new bootstrap.Modal(modalEl);
+        modal.show();
+        localStorage.setItem('disclosureSeen', 'true');
+      }
+    }, 500);
+  });
+</script>
+
 <body>
 <nav class="navbar navbar-expand-lg">
   <div class="container text-center">
@@ -57,7 +71,7 @@
     </div>
 </div>
 
-<footer class="footer text-center mt-5 mb-3">
+<footer class="footer text-center mt-2">
     <button class="btn btn-link text-decoration-none"
             data-bs-toggle="modal"
             data-bs-target="#policyModal">
