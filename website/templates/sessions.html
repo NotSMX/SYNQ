@@ -45,7 +45,7 @@
 {% for data in sessions %}
 <tr>
 
-<td class="session-title">
+<td class="session-list-title">
 {{ data.session.title }}
 </td>
 
@@ -114,7 +114,7 @@ function filterRows() {
     const timeFilter = searchTime.value.toLowerCase();
 
     document.querySelectorAll("#sessionsTable tbody tr").forEach(function(row) {
-        const title = row.querySelector(".session-title").textContent.toLowerCase();
+        const title = row.querySelector(".session-list-title").textContent.toLowerCase();
         const game = row.querySelector(".session-game").textContent.toLowerCase();
         const time = row.querySelector(".session-time").textContent.toLowerCase();
 
