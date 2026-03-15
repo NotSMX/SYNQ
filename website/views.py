@@ -24,6 +24,7 @@ from website.utils import notify_final_time, notify_personal_link
 
 from gevent.event import Event
 from gevent import sleep as gevent_sleep
+from gevent import spawn
 
 main = Blueprint("main", __name__)
 
@@ -151,7 +152,7 @@ def create_session():
         )
         db.session.add(host_participant)
         db.session.commit()
-        notify_personal_link(host_participant, new_session)
+        spawn(notify_personal_link, host_participant, new_session)
 
         new_session.host_id = host_participant.id
         db.session.commit()
@@ -180,8 +181,8 @@ def join_session(session_id):
         game_session.host_id = participant.id
         db.session.commit()
 
-    notify_personal_link(participant, game_session)
-
+    spawn(notify_personal_link, participant, game_session)
+    
     return redirect(url_for(
         "main.view_session",
         session_hash=game_session.hash_id,
