@@ -1070,7 +1070,6 @@ def import_db():
         db.session.add(Participant(
             id=p["id"], name=p["name"], email=p["email"],
             session_id=p["session_id"], token=p["token"],
-            created_at=datetime.fromisoformat(p["created_at"]) if p.get("created_at") else None,
         ))
     db.session.commit()
 
