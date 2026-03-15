@@ -1514,3 +1514,137 @@ def test_seed_test_data_eve_has_confirmation(client, app):
         conf = Confirmation.query.filter_by(participant_id=eve.id).first()
         assert conf is not None
         assert conf.status == "yes"
+
+def test_export_db(client, app):
+    """Export returns all tables as JSON."""
+    with app.app_context():
+        s = Session(title="Export Test", is_public=True)
+        db.session.add(s)
+        db.session.commit()
+        p = Participant(name="Alice", email="alice@test.com", session_id=s.id)
+        db.session.add(p)
+        db.session.commit()
+
+    resp = client.get("/export-db")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert "sessions" in data
+    assert "participants" in data
+    assert "availability" in data
+    assert "confirmations" in data
+    assert "game_votes" in data
+    assert any(s["title"] == "Export Test" for s in data["sessions"])
+    assert any(p["email"] == "alice@test.com" for p in data["participants"])
+
+
+def test_import_db_get(client):
+    """GET /import-db returns the upload form."""
+    resp = client.get("/import-db")
+    assert resp.status_code == 200
+    assert b"form" in resp.data
+
+
+def test_import_db_no_file(client):
+    """POST with no file returns 400."""
+    resp = client.post("/import-db", data={})
+    assert resp.status_code == 400
+
+
+def test_import_db_restores_data(client, app):
+    """Import clears existing data and restores from JSON."""
+    import json
+    from io import BytesIO
+
+    payload = {
+        "sessions": [
+            {
+                "id": 99, "title": "Imported Session", "hash_id": "abc123",
+                "host_id": None, "final_time": None,
+                "chosen_game": None, "is_public": True,
+            }
+        ],
+        "participants": [
+            {
+                "id": 99, "name": "Bob", "email": "bob@test.com",
+                "session_id": 99, "token": "tok999",
+            }
+        ],
+        "availability": [],
+        "confirmations": [],
+        "game_votes": [],
+    }
+
+    data = json.dumps(payload).encode()
+    resp = client.post(
+        "/import-db",
+        data={"file": (BytesIO(data), "backup.json")},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code in (200, 302)
+
+    with app.app_context():
+        from website.models import Session, Participant
+        s = Session.query.filter_by(hash_id="abc123").first()
+        assert s is not None
+        assert s.title == "Imported Session"
+        p = Participant.query.filter_by(token="tok999").first()
+        assert p is not None
+        assert p.name == "Bob"
+
+
+def test_import_db_clears_existing(client, app):
+    """Import wipes existing data before restoring."""
+    import json
+    from io import BytesIO
+    from website.models import Session as SessionModel
+
+    with app.app_context():
+        s = SessionModel(title="Old Session", is_public=True)
+        db.session.add(s)
+        db.session.commit()
+
+    payload = {
+        "sessions": [], "participants": [],
+        "availability": [], "confirmations": [], "game_votes": [],
+    }
+    data = json.dumps(payload).encode()
+    client.post(
+        "/import-db",
+        data={"file": (BytesIO(data), "backup.json")},
+        content_type="multipart/form-data",
+    )
+
+    with app.app_context():
+        assert SessionModel.query.count() == 0
+
+
+def test_import_db_with_final_time(client, app):
+    """Import correctly parses ISO final_time strings."""
+    import json
+    from io import BytesIO
+
+    payload = {
+        "sessions": [
+            {
+                "id": 77, "title": "Timed Session", "hash_id": "timed77",
+                "host_id": None, "final_time": "2026-03-20T18:00:00",
+                "chosen_game": "Valorant", "is_public": False,
+            }
+        ],
+        "participants": [], "availability": [],
+        "confirmations": [], "game_votes": [],
+    }
+
+    data = json.dumps(payload).encode()
+    client.post(
+        "/import-db",
+        data={"file": (BytesIO(data), "backup.json")},
+        content_type="multipart/form-data",
+    )
+
+    with app.app_context():
+        from website.models import Session
+        s = Session.query.filter_by(hash_id="timed77").first()
+        assert s is not None
+        assert s.chosen_game == "Valorant"
+        assert s.final_time is not None

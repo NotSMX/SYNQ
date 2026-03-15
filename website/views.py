@@ -957,7 +957,7 @@ def _sse_generate(session_hash):
                     })
 
                     yield f"event: state\ndata: {payload}\n\n"
-                    
+
                 now = _time.time()
 
                 if now - start >= _SSE_MAX_DURATION:
@@ -980,3 +980,122 @@ def _sse_generate(session_hash):
             waiters = _session_waiters.get(session_hash, [])
             if event in waiters:
                 waiters.remove(event)
+
+@main.route("/export-db")
+def export_db():
+    from flask import jsonify
+    from website.models import Participant, Session, Confirmation, Availability, GameVote
+
+    data = {
+        "sessions": [
+            {
+                "id": s.id, "title": s.title, "hash_id": s.hash_id,
+                "host_id": s.host_id, "final_time": s.final_time.isoformat() if s.final_time else None,
+                "chosen_game": s.chosen_game, "is_public": s.is_public,
+                "datetime": s.datetime.isoformat() if s.datetime else None,
+            }
+            for s in Session.query.all()
+        ],
+        "participants": [
+            {
+                "id": p.id, "name": p.name, "email": p.email,
+                "session_id": p.session_id, "token": p.token,
+            }
+            for p in Participant.query.all()
+        ],
+        "availability": [
+            {
+                "id": a.id, "session_id": a.session_id, "participant_id": a.participant_id,
+                "start_time": a.start_time.isoformat() if a.start_time else None,
+                "end_time": a.end_time.isoformat() if a.end_time else None,
+            }
+            for a in Availability.query.all()
+        ],
+        "confirmations": [
+            {
+                "id": c.id, "session_id": c.session_id,
+                "participant_id": c.participant_id, "status": c.status,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+            }
+            for c in Confirmation.query.all()
+        ],
+        "game_votes": [
+            {
+                "id": v.id, "session_id": v.session_id,
+                "participant_id": v.participant_id, "game_name": v.game_name,
+            }
+            for v in GameVote.query.all()
+        ],
+    }
+    return jsonify(data)
+
+@main.route("/import-db", methods=["GET", "POST"])
+def import_db():
+    if request.method == "GET":
+        return '''
+        <form method="POST" enctype="multipart/form-data">
+            <input type="file" name="file" accept=".json" required>
+            <button type="submit">Import</button>
+        </form>
+        '''
+
+    f = request.files.get("file")
+    if not f:
+        return "No file uploaded", 400
+
+    data = json.loads(f.read())
+
+    # Clear existing data in dependency order
+    GameVote.query.delete()
+    Confirmation.query.delete()
+    Availability.query.delete()
+    Participant.query.delete()
+    Session.query.delete()
+    db.session.commit()
+
+    # Re-insert sessions
+    for s in data.get("sessions", []):
+        db.session.add(Session(
+            id=s["id"], title=s["title"], hash_id=s["hash_id"],
+            host_id=s["host_id"], chosen_game=s["chosen_game"],
+            is_public=s["is_public"],
+            final_time=datetime.fromisoformat(s["final_time"]) if s.get("final_time") else None,
+            datetime=datetime.fromisoformat(s["datetime"]) if s.get("datetime") else None,
+        ))
+    db.session.commit()
+
+    # Re-insert participants
+    for p in data.get("participants", []):
+        db.session.add(Participant(
+            id=p["id"], name=p["name"], email=p["email"],
+            session_id=p["session_id"], token=p["token"],
+        ))
+    db.session.commit()
+
+    # Re-insert availability
+    for a in data.get("availability", []):
+        db.session.add(Availability(
+            id=a["id"], session_id=a["session_id"], participant_id=a["participant_id"],
+            start_time=datetime.fromisoformat(a["start_time"]) if a["start_time"] else None,
+            end_time=datetime.fromisoformat(a["end_time"]) if a["end_time"] else None,
+        ))
+    db.session.commit()
+
+    # Re-insert confirmations
+    for c in data.get("confirmations", []):
+        db.session.add(Confirmation(
+            id=c["id"], session_id=c["session_id"],
+            participant_id=c["participant_id"], status=c["status"],
+            created_at=datetime.fromisoformat(c["created_at"]) if c.get("created_at") else None,
+        ))
+
+    # Re-insert game votes
+    for v in data.get("game_votes", []):
+        db.session.add(GameVote(
+            id=v["id"], session_id=v["session_id"],
+            participant_id=v["participant_id"], game_name=v["game_name"],
+        ))
+    db.session.commit()
+
+    flash(f"Imported {len(data.get('sessions', []))} sessions and {len(data.get('participants', []))} participants.", "success")
+    return redirect(url_for("main.dashboard"))
