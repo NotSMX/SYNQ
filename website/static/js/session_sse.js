@@ -55,35 +55,42 @@
 
     function updateGameTally(tally) {
         if (!tally) return;
-        var container = document.getElementById('game-tally');
+        var container = document.getElementById('game-tally-list');  // was 'game-tally'
         if (!container) return;
         var noVotes = document.getElementById('no-votes-msg');
 
         if (tally.length === 0) {
             if (noVotes) noVotes.style.display = '';
-            container.querySelectorAll('.vote-card').forEach(function(el) { el.remove(); });
+            container.querySelectorAll('.game-vote-card').forEach(function(el) { el.remove(); });  // was 'vote-card'
             return;
         }
         if (noVotes) noVotes.style.display = 'none';
 
         var existing = {};
-        container.querySelectorAll('.vote-card').forEach(function(el) {
+        container.querySelectorAll('.game-vote-card').forEach(function(el) {  // was 'vote-card'
             existing[el.dataset.game] = el;
         });
 
         tally.forEach(function(item) {
             var key = item.name;
             if (existing[key]) {
-                var countEl = existing[key].querySelector('.vote-count');
-                if (countEl) countEl.textContent = item.count;
+                var countEl = existing[key].querySelector('.game-vote-count');  // was 'vote-count'
+                if (countEl) countEl.textContent = item.count + (item.count !== 1 ? ' votes' : ' vote');
                 delete existing[key];
             } else {
                 var card = document.createElement('div');
-                card.className = 'vote-card';
+                card.className = 'game-vote-card';
                 card.dataset.game = key;
-                card.innerHTML = '<span class="vote-name">' + key + '</span>' +
-                    ' <span class="vote-count">' + item.count + '</span>';
+                card.innerHTML = '<img class="game-cover-img" src="" alt="' + key + '" style="display:none;">' +
+                    '<div class="game-vote-info">' +
+                    '<span class="game-vote-name">' + key + '</span>' +
+                    '<span class="game-vote-count">' + item.count + (item.count !== 1 ? ' votes' : ' vote') + '</span>' +
+                    '</div>';
                 container.appendChild(card);
+                // fetch cover for newly added card
+                if (typeof window.applyGameCover === 'function') {
+                    window.applyGameCover(card);
+                }
             }
         });
 
