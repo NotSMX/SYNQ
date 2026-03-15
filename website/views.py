@@ -46,6 +46,10 @@ def dashboard():
 
 @main.route("/reset-db", methods=["POST"])
 def reset_db():
+    from sqlalchemy import text
+    with db.engine.connect() as conn:
+        conn.execute(text("UPDATE session SET host_id = NULL"))
+        conn.commit()
     GameVote.query.delete()
     Confirmation.query.delete()
     Availability.query.delete()
@@ -806,17 +810,15 @@ def seed_test_data():
     from datetime import datetime, timezone, timedelta
     from website.models import Participant, Session, Confirmation, Availability
     from sqlalchemy import text
-
-    # Clear existing data first
     with db.engine.connect() as conn:
-        # Clear existing data first
-        GameVote.query.delete()
-        Confirmation.query.delete()
-        Availability.query.delete()
-        Participant.query.delete()
-        Session.query.delete()
-        db.session.commit()
+        conn.execute(text("UPDATE session SET host_id = NULL"))
         conn.commit()
+    GameVote.query.delete()
+    Confirmation.query.delete()
+    Availability.query.delete()
+    Participant.query.delete()
+    Session.query.delete()
+    db.session.commit()
 
     now = datetime.now(timezone.utc)
 
