@@ -9,8 +9,6 @@ Create Session → Join → Submit Availability → Auto Pick → Confirm
 # pylint: disable=duplicate-code
 
 import json
-import hashlib, time
-import weakref
 from flask import has_request_context
 from datetime import datetime
 
@@ -765,14 +763,6 @@ def session_state(session_hash):
     })
 
 
-# ── Route 2: SSE stream ────────────────────────────────────────────────────────
-
-import time as _time  # module-level so tests can monkeypatch website.views._time
-
-_SSE_POLL_INTERVAL = 0.5    # seconds between DB checks
-_SSE_KEEPALIVE_EVERY = 15 # seconds — send a comment to prevent proxy timeouts
-_SSE_MAX_DURATION = 300   # 5 min — client will auto-reconnect via EventSource
-
 @main.route("/seed-test-data", methods=["POST"])
 def seed_test_data():
     """Seed fake participants and sessions for metrics testing."""
@@ -926,6 +916,9 @@ def import_db():
         return "No file uploaded", 400
 
     data = json.loads(f.read())
+    with db.engine.connect() as conn:
+        conn.execute(text("UPDATE session SET host_id = NULL"))
+        conn.commit()
 
     # Clear existing data in dependency order
     GameVote.query.delete()
