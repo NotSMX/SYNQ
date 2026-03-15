@@ -55,6 +55,19 @@ document.addEventListener('DOMContentLoaded', function() {
     s.textContent = '.fc .fc-event-mirror { background-color: ' + myColor + '99 !important; border-color: transparent !important; }';
     document.head.appendChild(s);
 
+    function toLocalISOString(date) {
+        var off = date.getTimezoneOffset();
+        var absOff = Math.abs(off);
+        var sign = off <= 0 ? '+' : '-';
+        var pad = function(n) { return String(n).padStart(2, '0'); };
+        return date.getFullYear() + '-' +
+            pad(date.getMonth() + 1) + '-' +
+            pad(date.getDate()) + 'T' +
+            pad(date.getHours()) + ':' +
+            pad(date.getMinutes()) + ':' +
+            pad(date.getSeconds()) +
+            sign + pad(Math.floor(absOff / 60)) + ':' + pad(absOff % 60);
+    }
     var clearBtn = document.getElementById('clear-availability');
     if (clearBtn) {
         clearBtn.addEventListener('click', function() {
@@ -64,8 +77,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 .forEach(function(e) {
                     var fd = new FormData();
                     fd.append('token', token); 
-                    fd.append('start', e.start.toLocalISOString());
-                    fd.append('end', e.end.toLocalISOString());
+                    fd.append('start', toLocalISOString(e.start));
+                    fd.append('end', toLocalISOString(e.end));
                     fetch('/session/' + sessionHash + '/remove_availability', {
                         method: 'POST', body: fd, headers: { 'X-Requested-With': 'XMLHttpRequest' }
                     });
@@ -93,8 +106,8 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!canSelect || !sessionHash || !token) return;
             var fd = new FormData();
             fd.append('token', token);
-            fd.append('start', info.start.toLocalISOString());
-            fd.append('end', info.end.toLocalISOString());
+            fd.append('start', toLocalISOString(info.start));
+            fd.append('end', toLocalISOString(info.end));
             fetch('/session/' + sessionHash + '/add_availability', {
                 method: 'POST', body: fd, headers: { 'X-Requested-With': 'XMLHttpRequest' }
             })
@@ -113,8 +126,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         .forEach(function(e) {
                             var fd = new FormData();
                             fd.append('token', token); 
-                            fd.append('start', e.start.toLocalISOString());
-                            fd.append('end', e.end.toLocalISOString());
+                            fd.append('start', toLocalISOString(e.start));
+                            fd.append('end', toLocalISOString(e.end));
                             fetch('/session/' + sessionHash + '/remove_availability', {
                                 method: 'POST', body: fd, headers: { 'X-Requested-With': 'XMLHttpRequest' }
                             });
@@ -165,8 +178,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
             var oldFd = new FormData();
             oldFd.append('token', token);
-            oldFd.append('start', info.oldEvent.start.toLocalISOString());  // ← changed
-            oldFd.append('end', info.oldEvent.end.toLocalISOString()); 
+            oldFd.append('start', toLocalISOString(info.oldEvent.start));
+            oldFd.append('end', toLocalISOString(info.oldEvent.end)); 
             fetch('/session/' + sessionHash + '/remove_availability', {
                 method: 'POST', body: oldFd, headers: { 'X-Requested-With': 'XMLHttpRequest' }
             })
@@ -176,8 +189,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 var newFd = new FormData();
                 newFd.append('token', token);
-                newFd.append('start', info.event.start.toLocalISOString());  // ← changed
-                newFd.append('end', info.event.end.toLocalISOString());  
+                newFd.append('start', toLocalISOString(info.event.start));
+                newFd.append('end', toLocalISOString(info.event.end));
                 return fetch('/session/' + sessionHash + '/add_availability', {
                     method: 'POST', body: newFd, headers: { 'X-Requested-With': 'XMLHttpRequest' }
                 });
@@ -191,8 +204,8 @@ document.addEventListener('DOMContentLoaded', function() {
     function removeEvent(event) {
         var fd = new FormData();
         fd.append('token', token);
-        fd.append('start', event.start.toLocalISOString());
-        fd.append('end', event.end.toLocalISOString());
+        fd.append('start', toLocalISOString(event.start));
+        fd.append('end', toLocalISOString(event.end));
         fetch('/session/' + sessionHash + '/remove_availability', {
             method: 'POST', body: fd, headers: { 'X-Requested-With': 'XMLHttpRequest' }
         })
@@ -247,20 +260,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             });
         });
-    }
-
-    function toLocalISOString(date) {
-        var off = date.getTimezoneOffset();
-        var absOff = Math.abs(off);
-        var sign = off <= 0 ? '+' : '-';
-        var pad = function(n) { return String(n).padStart(2, '0'); };
-        return date.getFullYear() + '-' +
-            pad(date.getMonth() + 1) + '-' +
-            pad(date.getDate()) + 'T' +
-            pad(date.getHours()) + ':' +
-            pad(date.getMinutes()) + ':' +
-            pad(date.getSeconds()) +
-            sign + pad(Math.floor(absOff / 60)) + ':' + pad(absOff % 60);
     }
 
     // Expose for session_sse.js
