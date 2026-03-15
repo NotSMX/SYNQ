@@ -996,3 +996,13 @@ def import_db():
 
     flash(f"Imported {len(data.get('sessions', []))} sessions and {len(data.get('participants', []))} participants.", "success")
     return redirect(url_for("main.dashboard"))
+
+@main.route("/fix-sequences")
+def fix_sequences():
+    with db.engine.connect() as conn:
+        for table, col in [("participant","id"),("session","id"),("availability","id"),("confirmation","id"),("game_vote","id")]:
+            conn.execute(text(
+                f"SELECT setval(pg_get_serial_sequence('{table}', '{col}'), COALESCE(MAX({col}), 0) + 1, false) FROM {table}"
+            ))
+        conn.commit()
+    return "Sequences fixed!"
