@@ -22,15 +22,10 @@ from website import db
 from website.models import Confirmation, Participant, Session, Availability, GameVote
 from website.utils import notify_final_time, notify_personal_link
 
-from gevent.event import Event
-from gevent import sleep as gevent_sleep
 from gevent import spawn
 
 main = Blueprint("main", __name__)
 
-# Global registry of waiting SSE clients per session
-_session_waiters: dict[str, list] = {}
-_session_waiters_lock = __import__('threading').Lock()
 
 @main.route("/")
 def index():
@@ -182,7 +177,7 @@ def join_session(session_id):
         db.session.commit()
 
     spawn(notify_personal_link, participant, game_session)
-    
+
     return redirect(url_for(
         "main.view_session",
         session_hash=game_session.hash_id,
@@ -405,7 +400,6 @@ def auto_pick(session_hash):
     start, _ = overlap[0]
     session_obj.final_time = start
     db.session.commit()
-    _notify_waiters(session_hash)
     flash(
         f"Session set to {start.strftime('%A, %B %d at %I:%M %p')} "
         "(time that works for everyone).",
@@ -430,7 +424,6 @@ def manual_pick(session_hash):
     manual_time_str = request.form["manual_time"]
     session_obj.final_time = datetime.fromisoformat(manual_time_str)
     db.session.commit()
-    _notify_waiters(session_hash)
     _notify_and_flash(session_obj)
     return redirect(url_for(
         "main.view_session", session_hash=session_obj.hash_id, token=participant.token
@@ -458,7 +451,6 @@ def confirm(session_id, token):
         confirmation.status = status
 
     db.session.commit()
-    _notify_waiters(participant.session.hash_id)
     return redirect(url_for(
         "main.view_session",
         session_hash=participant.session.hash_id, token=token
@@ -493,7 +485,6 @@ def join_and_vote(session_hash):
     )
     db.session.add(vote)
     db.session.commit()
-    _notify_waiters(session_hash)
     flash("Thanks! Your vote was added.", "success")
     return redirect(url_for(
         "main.view_session", session_hash=session_hash, token=participant.token
@@ -528,7 +519,6 @@ def vote_game(session_hash):
             game_name=game_name
         ))
     db.session.commit()
-    _notify_waiters(session_hash)
     flash("Vote saved.", "success")
     return redirect(url_for(
         "main.view_session", session_hash=session_hash, token=participant_token
@@ -584,7 +574,6 @@ def add_availability_from_calendar(session_hash):
         end_time=end_dt,
     ))
     db.session.commit()
-    _notify_waiters(session_hash)
     return ok_redirect()
 
 
@@ -606,7 +595,6 @@ def set_game(session_hash):
     game_name = (request.form.get("game_name") or "").strip() or None
     game_session.chosen_game = game_name
     db.session.commit()
-    _notify_waiters(session_hash)
     flash("Game set." if game_name else "Game cleared.", "success")
     return redirect(url_for(
         "main.view_session", session_hash=session_hash, token=participant_token
@@ -657,7 +645,6 @@ def remove_availability_from_calendar(session_hash):
 
     db.session.delete(block)
     db.session.commit()
-    _notify_waiters(session_hash)
 
     if is_xhr:
         return {"ok": True}
@@ -786,29 +773,6 @@ _SSE_POLL_INTERVAL = 0.5    # seconds between DB checks
 _SSE_KEEPALIVE_EVERY = 15 # seconds — send a comment to prevent proxy timeouts
 _SSE_MAX_DURATION = 300   # 5 min — client will auto-reconnect via EventSource
 
-@main.route("/session/<session_hash>/stream")
-def stream_session(session_hash):
-    """
-    Server-Sent Events endpoint.
-
-    The client connects once; the server pushes a 'state' event whenever
-    the session changes (availability, votes, confirmations, chosen game,
-    final time). Falls back gracefully if the session disappears.
-    """
-    from flask import Response, stream_with_context  # noqa: PLC0415
-
-    return Response(
-        stream_with_context(_sse_generate(session_hash)),
-        mimetype="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-            "Connection": "keep-alive",
-            "X-Content-Type-Options": "nosniff",
-            "Transfer-Encoding": "chunked", 
-        },
-    )
-
 @main.route("/seed-test-data", methods=["POST"])
 def seed_test_data():
     """Seed fake participants and sessions for metrics testing."""
@@ -898,117 +862,6 @@ def seed_test_data():
     db.session.commit()
     flash("Test data seeded.", "success")
     return redirect(url_for("main.dashboard"))
-
-def _notify_waiters(session_hash):
-    """Wake up all SSE clients watching this session."""
-    with _session_waiters_lock:
-        waiters = _session_waiters.get(session_hash, [])
-        for w in waiters:
-            w.set()
-
-
-def _sse_generate(session_hash):
-    import json as _json
-    from website.models import Session as S, GameVote, Confirmation
-
-    event = Event()
-
-    with _session_waiters_lock:
-        _session_waiters.setdefault(session_hash, []).append(event)
-
-    last_hash = None
-    last_keepalive = _time.time()
-    start = _time.time()
-
-    try:
-        while True:
-            try:
-                db.session.expire_all()
-                db.session.close()
-
-                with db.session.no_autoflush:
-                    gs = S.query.filter_by(hash_id=session_hash).first()
-
-                if gs is None:
-                    yield "event: gone\ndata: {}\n\n"
-                    return
-
-                current_hash = _session_state_hash(gs)
-
-                if current_hash != last_hash:
-                    last_hash = current_hash
-
-                    avail = {
-                        p.name: [
-                            {
-                                "start": b.start_time.isoformat(),
-                                "end": b.end_time.isoformat(),
-                            }
-                            for b in p.availabilities
-                            if b.start_time and b.end_time
-                        ]
-                        for p in gs.participants
-                    }
-
-                    votes = GameVote.query.filter_by(session_id=gs.id).all()
-                    tally = {}
-                    for v in votes:
-                        key = (v.game_name or "").strip().lower()
-                        display = (v.game_name or "").strip()
-                        tally[key] = {
-                            "name": display,
-                            "count": tally.get(key, {}).get("count", 0) + 1,
-                        }
-
-                    game_tally = sorted(tally.values(), key=lambda x: -x["count"])
-
-                    confs = Confirmation.query.filter_by(session_id=gs.id).all()
-                    conf_map = {}
-                    for c in confs:
-                        p = next(
-                            (x for x in gs.participants if x.id == c.participant_id),
-                            None,
-                        )
-                        if p:
-                            conf_map[p.name] = c.status
-
-                    payload = _json.dumps({
-                        "availability": avail,
-                        "game_tally": game_tally,
-                        "chosen_game": gs.chosen_game,
-                        "final_time": (
-                            gs.final_time.isoformat() if gs.final_time else None
-                        ),
-                        "confirmations": conf_map,
-                        "participants": [p.name for p in gs.participants],
-                        "state_hash": current_hash,
-                    })
-
-                    yield f"event: state\ndata: {payload}\n\n"
-
-                now = _time.time()
-
-                if now - start >= _SSE_MAX_DURATION:
-                    yield "event: reconnect\ndata: {}\n\n"
-                    return
-
-                if now - last_keepalive >= _SSE_KEEPALIVE_EVERY:
-                    yield ": keepalive\n\n"
-                    last_keepalive = now
-
-            except Exception:
-                yield ": error\n\n"
-
-            # Wait for notify or timeout — releases thread/greenlet
-            event.wait(timeout=2.0)
-            event.clear()
-            gevent_sleep(0)
-
-    finally:
-        with _session_waiters_lock:
-            waiters = _session_waiters.get(session_hash, [])
-            if event in waiters:
-                waiters.remove(event)
 
 @main.route("/export-db")
 def export_db():
