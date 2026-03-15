@@ -86,6 +86,7 @@ document.addEventListener('DOMContentLoaded', function() {
         selectOverlap: true,
         longPressDelay: 300,
         selectLongPressDelay: 300,  
+        timeZone: 'local',
 
         select: function(info) {
             if (!canSelect || !sessionHash || !token) return;
