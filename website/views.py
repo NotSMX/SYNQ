@@ -46,10 +46,12 @@ def dashboard():
 
 @main.route("/reset-db", methods=["POST"])
 def reset_db():
-    from sqlalchemy import text
-    with db.engine.connect() as conn:
-        conn.execute(text("DROP TABLE IF EXISTS game_vote, confirmation, availability, participant, session, \"user\" CASCADE"))
-        conn.commit()
+    GameVote.query.delete()
+    Confirmation.query.delete()
+    Availability.query.delete()
+    Participant.query.delete()
+    Session.query.delete()
+    db.session.commit()
     db.create_all()
     flash("Database reset.", "success")
     return redirect(url_for("main.dashboard"))
@@ -802,9 +804,15 @@ def seed_test_data():
 
     # Clear existing data first
     with db.engine.connect() as conn:
-        conn.execute(text("TRUNCATE TABLE game_vote, confirmation, availability, participant, session CASCADE"))
+        # Clear existing data first
+        GameVote.query.delete()
+        Confirmation.query.delete()
+        Availability.query.delete()
+        Participant.query.delete()
+        Session.query.delete()
+        db.session.commit()
         conn.commit()
-        
+
     now = datetime.now(timezone.utc)
 
     # ── User A: repeat user (2 sessions, 3 days apart) ──────────────────
