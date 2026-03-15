@@ -798,7 +798,13 @@ def seed_test_data():
     """Seed fake participants and sessions for metrics testing."""
     from datetime import datetime, timezone, timedelta
     from website.models import Participant, Session, Confirmation, Availability
+    from sqlalchemy import text
 
+    # Clear existing data first
+    with db.engine.connect() as conn:
+        conn.execute(text("TRUNCATE TABLE game_vote, confirmation, availability, participant, session CASCADE"))
+        conn.commit()
+        
     now = datetime.now(timezone.utc)
 
     # ── User A: repeat user (2 sessions, 3 days apart) ──────────────────
