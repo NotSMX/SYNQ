@@ -284,7 +284,11 @@ def _build_game_tally(game_session, participant):
 @main.route('/session/<session_hash>')
 def view_session(session_hash):
     """View a session page."""
-    game_session = Session.query.filter_by(hash_id=session_hash).first_or_404()
+    game_session = Session.query.filter_by(hash_id=session_hash).first()
+    if not game_session:
+        flash("This session no longer exists.", "warning")
+        return redirect(url_for("main.index"))
+    
     participant_token = request.args.get('token')
     participant = (
         Participant.query.filter_by(token=participant_token).first()

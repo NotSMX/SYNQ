@@ -32,6 +32,7 @@
     es.addEventListener("gone", () => {
       es.close();
       es = null;
+      window.location.href = "/";
     });
 
     // Server closes after MAX_DURATION; reconnect seamlessly
