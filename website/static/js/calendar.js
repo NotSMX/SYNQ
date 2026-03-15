@@ -93,7 +93,9 @@ document.addEventListener('DOMContentLoaded', function() {
         select: function(info) {
             if (!canSelect || !sessionHash || !token) return;
             var fd = new FormData();
-            fd.append('token', token); fd.append('start', info.startStr); fd.append('end', info.endStr);
+            fd.append('token', token);
+            fd.append('start', info.start.toISOString());
+            fd.append('end', info.end.toISOString());
             fetch('/session/' + sessionHash + '/add_availability', {
                 method: 'POST', body: fd, headers: { 'X-Requested-With': 'XMLHttpRequest' }
             })
