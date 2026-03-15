@@ -73,15 +73,19 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     var calendar = new FullCalendar.Calendar(calendarEl, {
-        initialView: 'timeGridWeek',
+        initialView: window.innerWidth < 768 ? 'timeGridDay' : 'timeGridWeek',
         height: 500,
         slotMinTime: '06:00:00',
         slotMaxTime: '24:00:00',
         headerToolbar: { left: 'prev,next today', center: 'title', right: 'timeGridWeek,timeGridDay' },
         events: events,
         nowIndicator: true,
-        selectable: canSelect, editable: canSelect, selectMirror: false,
+        selectable: canSelect,
+        editable: canSelect,
+        selectMirror: false,
         selectOverlap: () => true,
+        longPressDelay: 300,
+        selectLongPressDelay: 300,  
 
         select: function(info) {
             if (!canSelect || !sessionHash || !token) return;

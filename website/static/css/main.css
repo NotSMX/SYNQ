@@ -554,3 +554,13 @@ hr {
 .btn-link{
     color: #7b2ff7;
 }
+
+/* Larger touch targets for calendar on mobile */
+@media (max-width: 768px) {
+    .fc .fc-timegrid-slot {
+        height: 2.5rem !important;
+    }
+    .fc .fc-col-header-cell-cushion {
+        padding: 8px 4px;
+    }
+}
