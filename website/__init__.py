@@ -7,6 +7,7 @@ from flask import Flask
 from flask_login import LoginManager
 from flask_mail import Mail
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.pool import NullPool
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -32,6 +33,7 @@ def create_app():
     # bump pool_size to match your --threads count.
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
         "pool_pre_ping": True,
+        "poolclass": NullPool,
     }
 
     email_user = os.environ.get("EMAIL_USER")

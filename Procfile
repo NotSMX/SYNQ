@@ -1,1 +1,1 @@
-web: gunicorn --pythonpath . app:app --worker-class gevent --workers 2 --timeout 120
+web: gunicorn --pythonpath . app:app --worker-class gevent --workers 4 --worker-connections 100 --timeout 300
