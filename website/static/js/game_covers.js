@@ -11,14 +11,22 @@
         } catch { return null; }
     }
 
-    // Tally cards
-    document.querySelectorAll('#game-tally-list [data-game]').forEach(async card => {
-        const cover = await fetchCover(card.dataset.game);
+    async function applycover(card) {
         const img = card.querySelector('.game-cover-img');
+        if (!img || img.dataset.loaded) return; // skip if already fetched
+        const cover = await fetchCover(card.dataset.game);
         if (cover && img) {
             img.src = cover;
+            img.style.display = 'block'; // ← was missing
+            img.dataset.loaded = 'true';
         }
-    });
+    }
+
+    // Initial load — cover existing cards
+    document.querySelectorAll('#game-tally-list [data-game]').forEach(applycover);
+
+    // Expose for SSE-injected cards
+    window.applyGameCover = applycover;
 
     // Chosen game banner
     const chosenEl = document.getElementById('chosen-game-img');

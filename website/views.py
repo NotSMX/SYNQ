@@ -748,7 +748,7 @@ def session_state(session_hash):
 
 import time as _time  # module-level so tests can monkeypatch website.views._time
 
-_SSE_POLL_INTERVAL = 2    # seconds between DB checks
+_SSE_POLL_INTERVAL = 0.5    # seconds between DB checks
 _SSE_KEEPALIVE_EVERY = 15 # seconds — send a comment to prevent proxy timeouts
 _SSE_MAX_DURATION = 300   # 5 min — client will auto-reconnect via EventSource
 
@@ -763,6 +763,8 @@ def _sse_generate(session_hash):
 
     while True:
         try:
+            db.session.expire_all()
+            db.session.close()
             # prevent flush of pending deletes from tests
             with db.session.no_autoflush:
                 gs = S.query.filter_by(hash_id=session_hash).first()

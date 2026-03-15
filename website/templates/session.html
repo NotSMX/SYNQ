@@ -10,6 +10,9 @@
         <h1 class="session-title">{{ session.title }}</h1>
     </div>
 
+    <span id="final-time-marker" data-final-time="{{ session.final_time.isoformat() if session.final_time else '' }}" style="display:none;"></span>
+    <span id="chosen-game-marker" data-chosen-game-name="{{ session.chosen_game or '' }}" style="display:none;"></span>
+
     {% if session.final_time %}
         <div class="final-time-banner">
             <p class="final-time-label">📅 Session Locked</p>
@@ -72,10 +75,25 @@
             {% endif %}
         {% else %}
             {% if token %}
-                <form action="{{ url_for('main.vote_game', session_hash=session.hash_id) }}?token={{ token }}" method="POST" class="d-flex gap-2 mb-3 flex-wrap justify-content-center">
-                    <input type="text" name="game_name" placeholder="e.g. Valorant, Among Us" value="{{ my_game_vote or '' }}" class="form-control" style="max-width: 220px;">
-                    <button type="submit" class="btn btn-primary">Vote</button>
-                </form>
+                <div class="d-flex gap-2 mb-3 flex-wrap justify-content-center">
+                    <input type="text" id="vote-input" placeholder="e.g. Valorant, Among Us" 
+                        value="{{ my_game_vote or '' }}" class="form-control" style="max-width: 220px;"
+                        onkeydown="if(event.key==='Enter'){event.preventDefault();submitVote();}">
+                    <button type="button" class="btn btn-primary" onclick="submitVote()">Vote</button>
+                </div>
+                <script>
+                function submitVote() {
+                    const gameName = document.getElementById('vote-input').value.trim();
+                    if (!gameName) return;
+                    const fd = new FormData();
+                    fd.append('game_name', gameName);
+                    fetch("{{ url_for('main.vote_game', session_hash=session.hash_id) }}?token={{ token }}", {
+                        method: 'POST', body: fd
+                    }).then(() => {
+                        // SSE will pick up the change automatically — no reload needed
+                    });
+                }
+                </script>
             {% else %}
                 <form action="{{ url_for('main.join_and_vote', session_hash=session.hash_id) }}" method="POST" class="mb-3">
                     <div class="d-flex flex-column gap-2 text-start">
@@ -106,7 +124,8 @@
                     {% endfor %}
                 </div>
             {% else %}
-                <p class="mb-0 small" style="color: #aaa;">No votes yet. Suggest a game above.</p>
+                <div class="d-flex flex-wrap gap-3 justify-content-center" id="game-tally-list"></div>
+                <p class="mb-0 small" id="no-votes-msg" style="color: #aaa;">No votes yet. Suggest a game above.</p>
             {% endif %}
         {% endif %}
     </div>
@@ -180,6 +199,8 @@ window.squadScheduleData = {{ grouped_json|tojson }};
 window.squadScheduleToken = {{ (token or '')|tojson }};
 window.squadScheduleHash = {{ session.hash_id|tojson }};
 window.squadScheduleMyName = {{ (participant.name if participant else '')|tojson }};
+window.squadIsHost = {{ 'true' if is_host else 'false' }};
+window.squadToken = {{ (token or '')|tojson }};
 </script>
 <link rel="stylesheet" href="/static/css/calendar.css">
 <script src="/static/js/calendar.js" defer></script>

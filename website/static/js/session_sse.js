@@ -23,6 +23,7 @@
     es = new EventSource(`/session/${hash}/stream`);
 
     es.addEventListener("state", (e) => {
+    console.log("SSE state received:", e.data);  // ← add this
       try {
         const data = JSON.parse(e.data);
         applyState(data);
@@ -52,12 +53,15 @@
 
   // ── state application ─────────────────────────────────────────────────────
 
-  function applyState(data) {
-    updateCalendar(data.availability);
-    updateGameTally(data.game_tally, data.chosen_game);
-    updateChosenGame(data.chosen_game);
-    updateConfirmations(data.confirmations);
-  }
+    function applyState(data) {
+        console.log("final_time:", data.final_time);
+        updateCalendar(data.availability);
+        updateParticipants(data.participants);
+        updateGameTally(data.game_tally, data.chosen_game);
+        updateChosenGame(data.chosen_game);
+        updateFinalTime(data.final_time);
+        updateConfirmations(data.confirmations);
+    }
 
   // ── calendar ──────────────────────────────────────────────────────────────
 
@@ -80,42 +84,84 @@
 
   // ── game tally ────────────────────────────────────────────────────────────
 
-  function updateGameTally(tally, chosenGame) {
-    if (!tally) return;
-    const list = document.getElementById("game-tally-list");
-    if (!list) return;
+    function updateGameTally(tally, chosenGame) {
+        if (!tally || chosenGame) return;
+        const list = document.getElementById("game-tally-list");
+        if (!list) return;
 
-    // Update vote counts on existing cards; don't rebuild DOM
-    // (preserves game cover images that game_covers.js may have loaded)
-    tally.forEach(({ name, count }) => {
-      const card = list.querySelector(`[data-game="${CSS.escape(name)}"]`);
-      if (!card) return;
-      const countEl = card.querySelector(".game-vote-count");
-      if (countEl) {
-        countEl.textContent = `${count} vote${count !== 1 ? "s" : ""}`;
-      }
-    });
-  }
+        // Remove cards for games no longer in tally
+        list.querySelectorAll("[data-game]").forEach(card => {
+            const stillExists = tally.some(({ name }) => name === card.dataset.game);
+            if (!stillExists) card.remove();
+        });
+
+        // Hide "no votes" message once votes exist
+        if (tally.length > 0) {
+            const noVotes = document.getElementById("no-votes-msg");
+            if (noVotes) noVotes.style.display = "none";
+        }
+
+        tally.forEach(({ name, count }) => {
+            let card = list.querySelector(`[data-game="${CSS.escape(name)}"]`);
+            if (!card) {
+                const isHost = window.squadIsHost;
+                const token = window.squadToken;
+                const hash = window.squadScheduleHash;
+                const setBtn = isHost ? `
+                    <form action="/session/${hash}/set_game?token=${token}" method="POST" class="mt-1">
+                        <input type="hidden" name="game_name" value="${name}">
+                        <button type="submit" class="btn btn-outline-success btn-med" style="font-size:0.7rem">Set ✓</button>
+                    </form>` : '';
+
+                card = document.createElement("div");
+                card.className = "game-vote-card";
+                card.setAttribute("data-game", name);
+                card.innerHTML = `
+                    <img class="game-cover-img" src="" alt="${name}" style="display:none;">
+                    <div class="game-vote-info">
+                        <span class="game-vote-name">${name}</span>
+                        <span class="game-vote-count"></span>
+                        ${setBtn}
+                    </div>`;
+                list.appendChild(card);
+
+                if (typeof window.applyGameCover === "function") {
+                    window.applyGameCover(card);
+                }
+            }
+            const countEl = card.querySelector(".game-vote-count");
+            if (countEl) countEl.textContent = `${count} vote${count !== 1 ? "s" : ""}`;
+        });
+    }
+
+    function updateParticipants(participants) {
+        if (!participants) return;
+        const squadList = document.getElementById("squad-list");
+        if (!squadList) return;
+        const colors = ["#3b82f6","#ef4444","#22c55e","#eab308","#a855f7","#f97316"];
+
+        participants.forEach((name) => {
+            if (!squadList.querySelector(`[data-name="${CSS.escape(name)}"]`)) {
+                const color = colors[squadList.children.length % colors.length];
+                const card = document.createElement("div");
+                card.className = "squad-card";
+                card.setAttribute("data-name", name);
+                card.innerHTML = `<div class="squad-pill" style="background:${color};">${name}</div>`;
+                squadList.appendChild(card);
+            }
+        });
+    }
+
 
   // ── chosen game banner ────────────────────────────────────────────────────
 
-  function updateChosenGame(chosenGame) {
-    // Only reload the page if chosen_game changed and we're not already
-    // showing it — a full reload is fine here because it's a rare, meaningful
-    // state transition (host picks the game).
-    const banner = document.querySelector("[data-chosen-game-name]");
-    const currentShown = banner
-      ? banner.dataset.chosenGameName
-      : null;
-
-    if (chosenGame && chosenGame !== currentShown) {
-      // Reload so Jinja renders the locked banner correctly
-      window.location.reload();
+    function updateChosenGame(chosenGame) {
+        const marker = document.getElementById("chosen-game-marker");
+        if (!marker) return;
+        const currentShown = marker.dataset.chosenGameName || "";
+        if (chosenGame && chosenGame !== currentShown) window.location.reload();
+        if (!chosenGame && currentShown) window.location.reload();
     }
-    if (!chosenGame && currentShown) {
-      window.location.reload(); // host cleared the game
-    }
-  }
 
   // ── confirmation pills ────────────────────────────────────────────────────
 
@@ -142,4 +188,17 @@
       pill.classList.add(STATUS_CLASSES[status] || "s-none");
     });
   }
+
+    function updateFinalTime(finalTime) {
+        const marker = document.getElementById("final-time-marker");
+        if (!marker) return;
+        const currentShown = marker.dataset.finalTime || "";
+
+        if (finalTime && finalTime !== currentShown) {
+            window.location.reload();
+        }
+        if (!finalTime && currentShown) {
+            window.location.reload();
+        }
+    }
 })();
