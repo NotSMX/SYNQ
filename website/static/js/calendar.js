@@ -126,23 +126,77 @@ document.addEventListener('DOMContentLoaded', function() {
         },
 
         eventClick: function(info) {
-            if (info.event.title !== myName || !confirm("Remove this availability?")) return;
-            var fd = new FormData();
-            fd.append('token', token); fd.append('start', info.event.startStr); fd.append('end', info.event.endStr);
+            // Desktop only — touch uses long-press via eventDidMount
+            if (window.matchMedia('(pointer: coarse)').matches) return;
+            if (info.event.title !== myName) return;
+            if (!confirm("Remove this availability?")) return;
+            removeEvent(info.event);
+        },
+
+        eventDidMount: function(info) {
+            if (!window.matchMedia('(pointer: coarse)').matches) return;
+            if (info.event.title !== myName) return;
+
+            let pressTimer = null;
+
+            info.el.addEventListener('touchstart', function(e) {
+                pressTimer = setTimeout(function() {
+                    if (!confirm("Remove this availability?")) return;
+                    removeEvent(info.event);
+                }, 600);
+            }, { passive: true });
+
+            info.el.addEventListener('touchend', function() {
+                clearTimeout(pressTimer);
+            });
+
+            info.el.addEventListener('touchmove', function() {
+                clearTimeout(pressTimer);  // cancel if they're dragging
+            });
+        },
+        eventDrop: function(info) {
+            if (info.event.title !== myName) { info.revert(); return; }
+
+            var oldFd = new FormData();
+            oldFd.append('token', token);
+            oldFd.append('start', info.oldEvent.startStr);
+            oldFd.append('end', info.oldEvent.endStr);
             fetch('/session/' + sessionHash + '/remove_availability', {
-                method: 'POST', body: fd, headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                method: 'POST', body: oldFd, headers: { 'X-Requested-With': 'XMLHttpRequest' }
             })
             .then(r => r.json())
             .then(function(data) {
-                if (!data || data.ok === false) { alert("Failed to remove availability."); return; }
-                info.event.remove();
+                if (!data || data.ok === false) { info.revert(); return; }
+
+                var newFd = new FormData();
+                newFd.append('token', token);
+                newFd.append('start', info.event.startStr);
+                newFd.append('end', info.event.endStr);
+                return fetch('/session/' + sessionHash + '/add_availability', {
+                    method: 'POST', body: newFd, headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                });
             })
-            .catch(function() { info.event.remove(); });
-        }
+            .catch(function() { info.revert(); });
+        },
     });
 
     calendar.render();
 
+    function removeEvent(event) {
+        var fd = new FormData();
+        fd.append('token', token);
+        fd.append('start', event.startStr);
+        fd.append('end', event.endStr);
+        fetch('/session/' + sessionHash + '/remove_availability', {
+            method: 'POST', body: fd, headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        })
+        .then(r => r.json())
+        .then(function(data) {
+            if (!data || data.ok === false) { alert("Failed to remove availability."); return; }
+            event.remove();
+        })
+        .catch(function() { event.remove(); });
+    }
     // ── SSE-driven live updates (replaces setInterval polling) ───────────────
     //
     // session_sse.js calls window.rebuildCalendar(availability) when the
