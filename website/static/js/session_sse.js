@@ -81,13 +81,22 @@
                 var card = document.createElement('div');
                 card.className = 'game-vote-card';
                 card.dataset.game = key;
+
+                var setBtn = '';
+                if (window.squadIsHost && window.squadToken) {
+                    setBtn = '<form action="/session/' + window.squadScheduleHash + '/set_game?token=' + window.squadToken + '" method="POST" class="mt-1">' +
+                        '<input type="hidden" name="game_name" value="' + key + '">' +
+                        '<button type="submit" class="btn btn-outline-success btn-med" style="font-size:0.7rem">Set ✓</button>' +
+                        '</form>';
+                }
+
                 card.innerHTML = '<img class="game-cover-img" src="" alt="' + key + '" style="display:none;">' +
                     '<div class="game-vote-info">' +
                     '<span class="game-vote-name">' + key + '</span>' +
                     '<span class="game-vote-count">' + item.count + (item.count !== 1 ? ' votes' : ' vote') + '</span>' +
+                    setBtn +
                     '</div>';
                 container.appendChild(card);
-                // fetch cover for newly added card
                 if (typeof window.applyGameCover === 'function') {
                     window.applyGameCover(card);
                 }
