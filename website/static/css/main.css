@@ -832,6 +832,11 @@ hr {
     border-radius: 8px;
 }
 
+.join-input::placeholder {
+    color: rgba(255, 255, 255, 0.65);
+    opacity: 1; /* important: prevents browser dimming */
+}
+
 /* Invite links */
 .link-row {
     display: flex;
