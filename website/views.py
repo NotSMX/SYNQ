@@ -9,27 +9,25 @@ Create Session → Join → Submit Availability → Auto Pick → Confirm
 # pylint: disable=duplicate-code
 
 import json
-import hashlib, time
-import weakref
 from flask import has_request_context
+from flask_socketio import join_room
 from datetime import datetime
 
 from flask import Blueprint, current_app, render_template, redirect, url_for, request, flash, jsonify
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from website import db
+from website import db, socketio
 from website.models import Confirmation, Participant, Session, Availability, GameVote
 from website.utils import notify_final_time, notify_personal_link
 
-from gevent.event import Event
-from gevent import sleep as gevent_sleep
+from gevent import spawn
 
 main = Blueprint("main", __name__)
 
-# Global registry of waiting SSE clients per session
-_session_waiters: dict[str, list] = {}
-_session_waiters_lock = __import__('threading').Lock()
+@socketio.on("join")
+def on_join(data):
+    join_room(data["session_hash"])
 
 @main.route("/")
 def index():
@@ -46,8 +44,16 @@ def dashboard():
 
 @main.route("/reset-db", methods=["POST"])
 def reset_db():
-    """Drop all tables and recreate (for testing)."""
-    db.drop_all()
+    from sqlalchemy import text
+    with db.engine.connect() as conn:
+        conn.execute(text("UPDATE session SET host_id = NULL"))
+        conn.commit()
+    GameVote.query.delete()
+    Confirmation.query.delete()
+    Availability.query.delete()
+    Participant.query.delete()
+    Session.query.delete()
+    db.session.commit()
     db.create_all()
     flash("Database reset.", "success")
     return redirect(url_for("main.dashboard"))
@@ -76,6 +82,12 @@ def list_sessions():
         sessions=sessions_data
     )
 
+def strip_tz(dt):
+    """Convert to UTC then strip timezone for naive storage."""
+    if dt.tzinfo is not None:
+        from datetime import timezone
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
 
 def _ensure_game_election_schema():
     """Ensure DB has columns/tables needed for game election (handles old SQLite DBs)."""
@@ -137,7 +149,7 @@ def create_session():
         )
         db.session.add(host_participant)
         db.session.commit()
-        notify_personal_link(host_participant, new_session)
+        spawn(notify_personal_link, host_participant, new_session)
 
         new_session.host_id = host_participant.id
         db.session.commit()
@@ -166,7 +178,7 @@ def join_session(session_id):
         game_session.host_id = participant.id
         db.session.commit()
 
-    notify_personal_link(participant, game_session)
+    spawn(notify_personal_link, participant, game_session)
 
     return redirect(url_for(
         "main.view_session",
@@ -266,11 +278,39 @@ def _build_game_tally(game_session, participant):
     game_tally = sorted(tally_by_key.values(), key=lambda x: -x[1])
     return game_tally, my_game_vote
 
+def _emit_state(session_hash):
+    """Broadcast current session state to all clients in the room."""
+    game_session = Session.query.filter_by(hash_id=session_hash).first()
+    if not game_session:
+        return
+    _, grouped_json = _build_grouped_json(game_session)
+    game_tally, _ = _build_game_tally(game_session, None)
+    tally_out = [{"name": g[0], "count": g[1]} for g in game_tally]
+
+    confs = Confirmation.query.filter_by(session_id=game_session.id).all()
+    conf_map = {}
+    for c in confs:
+        p = next((x for x in game_session.participants if x.id == c.participant_id), None)
+        if p:
+            conf_map[p.name] = c.status
+
+    socketio.emit("state_update", {
+        "availability": grouped_json,
+        "game_tally": tally_out,
+        "chosen_game": game_session.chosen_game,
+        "final_time": game_session.final_time.isoformat() if game_session.final_time else None,
+        "confirmations": conf_map,
+        "participants": [p.name for p in game_session.participants],
+    }, room=session_hash)
 
 @main.route('/session/<session_hash>')
 def view_session(session_hash):
     """View a session page."""
-    game_session = Session.query.filter_by(hash_id=session_hash).first_or_404()
+    game_session = Session.query.filter_by(hash_id=session_hash).first()
+    if not game_session:
+        flash("This session no longer exists.", "warning")
+        return redirect(url_for("main.index"))
+    
     participant_token = request.args.get('token')
     participant = (
         Participant.query.filter_by(token=participant_token).first()
@@ -386,13 +426,13 @@ def auto_pick(session_hash):
     start, _ = overlap[0]
     session_obj.final_time = start
     db.session.commit()
-    _notify_waiters(session_hash)
     flash(
         f"Session set to {start.strftime('%A, %B %d at %I:%M %p')} "
         "(time that works for everyone).",
         "success"
     )
     _notify_and_flash(session_obj)
+    _emit_state(session_hash)
     return redirect(url_for(
         "main.view_session", session_hash=session_obj.hash_id, token=participant.token
     ))
@@ -411,12 +451,11 @@ def manual_pick(session_hash):
     manual_time_str = request.form["manual_time"]
     session_obj.final_time = datetime.fromisoformat(manual_time_str)
     db.session.commit()
-    _notify_waiters(session_hash)
     _notify_and_flash(session_obj)
+    _emit_state(session_hash)
     return redirect(url_for(
         "main.view_session", session_hash=session_obj.hash_id, token=participant.token
     ))
-
 
 @main.route("/confirm/<session_id>/<token>", methods=["POST"])
 def confirm(session_id, token):
@@ -439,7 +478,12 @@ def confirm(session_id, token):
         confirmation.status = status
 
     db.session.commit()
-    _notify_waiters(participant.session.hash_id)
+    _emit_state(participant.session.hash_id)
+
+    # Return JSON for fetch requests, redirect for normal form posts
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest" or \
+       request.accept_mimetypes.accept_json:
+        return jsonify({"ok": True})
     return redirect(url_for(
         "main.view_session",
         session_hash=participant.session.hash_id, token=token
@@ -540,8 +584,8 @@ def vote_game(session_hash):
             game_name=game_name
         ))
     db.session.commit()
-    _notify_waiters(session_hash)
     flash("Vote saved.", "success")
+    _emit_state(session_hash)
     return redirect(url_for(
         "main.view_session", session_hash=session_hash, token=participant_token
     ))
@@ -568,13 +612,14 @@ def add_availability_from_calendar(session_hash):
         ))
 
     def ok_redirect():
+        _emit_state(session_hash)
         if is_xhr:
             return {"ok": True}
         flash("Availability added.", "success")
         return redirect(url_for(
             "main.view_session", session_hash=session_hash, token=participant_token
         ))
-
+    
     if not start_str or not end_str:
         return fail_json("Missing start or end time.")
 
@@ -582,14 +627,13 @@ def add_availability_from_calendar(session_hash):
     end_str = end_str.replace("Z", "+00:00")
 
     try:
-        start_dt = datetime.fromisoformat(start_str)
-        end_dt = datetime.fromisoformat(end_str)
+        start_dt = strip_tz(datetime.fromisoformat(start_str))
+        end_dt = strip_tz(datetime.fromisoformat(end_str))
     except ValueError:
         return fail_json("Invalid time format.")
 
     if start_dt >= end_dt:
         return fail_json("End must be after start.")
-
     db.session.add(Availability(
         session_id=game_session.id,
         participant_id=participant.id,
@@ -597,7 +641,6 @@ def add_availability_from_calendar(session_hash):
         end_time=end_dt,
     ))
     db.session.commit()
-    _notify_waiters(session_hash)
     return ok_redirect()
 
 
@@ -619,8 +662,8 @@ def set_game(session_hash):
     game_name = (request.form.get("game_name") or "").strip() or None
     game_session.chosen_game = game_name
     db.session.commit()
-    _notify_waiters(session_hash)
     flash("Game set." if game_name else "Game cleared.", "success")
+    _emit_state(session_hash)
     return redirect(url_for(
         "main.view_session", session_hash=session_hash, token=participant_token
     ))
@@ -653,10 +696,10 @@ def remove_availability_from_calendar(session_hash):
     end_str = end_str.replace("Z", "+00:00")
 
     try:
-        start_dt = datetime.fromisoformat(start_str)
-        end_dt = datetime.fromisoformat(end_str)
+        start_dt = strip_tz(datetime.fromisoformat(start_str))  
+        end_dt = strip_tz(datetime.fromisoformat(end_str))     
     except ValueError:
-        return fail("Invalid time format.")
+         return fail("Invalid time format.")
 
     block = Availability.query.filter_by(
         session_id=game_session.id,
@@ -670,8 +713,7 @@ def remove_availability_from_calendar(session_hash):
 
     db.session.delete(block)
     db.session.commit()
-    _notify_waiters(session_hash)
-
+    _emit_state(session_hash)
     if is_xhr:
         return {"ok": True}
 
@@ -791,42 +833,21 @@ def session_state(session_hash):
     })
 
 
-# ── Route 2: SSE stream ────────────────────────────────────────────────────────
-
-import time as _time  # module-level so tests can monkeypatch website.views._time
-
-_SSE_POLL_INTERVAL = 0.5    # seconds between DB checks
-_SSE_KEEPALIVE_EVERY = 15 # seconds — send a comment to prevent proxy timeouts
-_SSE_MAX_DURATION = 300   # 5 min — client will auto-reconnect via EventSource
-
-@main.route("/session/<session_hash>/stream")
-def stream_session(session_hash):
-    """
-    Server-Sent Events endpoint.
-
-    The client connects once; the server pushes a 'state' event whenever
-    the session changes (availability, votes, confirmations, chosen game,
-    final time). Falls back gracefully if the session disappears.
-    """
-    from flask import Response, stream_with_context  # noqa: PLC0415
-
-    return Response(
-        stream_with_context(_sse_generate(session_hash)),
-        mimetype="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-            "Connection": "keep-alive",
-            "X-Content-Type-Options": "nosniff",
-            "Transfer-Encoding": "chunked", 
-        },
-    )
-
 @main.route("/seed-test-data", methods=["POST"])
 def seed_test_data():
     """Seed fake participants and sessions for metrics testing."""
     from datetime import datetime, timezone, timedelta
     from website.models import Participant, Session, Confirmation, Availability
+    from sqlalchemy import text
+    with db.engine.connect() as conn:
+        conn.execute(text("UPDATE session SET host_id = NULL"))
+        conn.commit()
+    GameVote.query.delete()
+    Confirmation.query.delete()
+    Availability.query.delete()
+    Participant.query.delete()
+    Session.query.delete()
+    db.session.commit()
 
     now = datetime.now(timezone.utc)
 
@@ -834,26 +855,26 @@ def seed_test_data():
     s1 = Session(title="User A Session 1", is_public=True, datetime=now - timedelta(days=6))
     s2 = Session(title="User A Session 2", is_public=True, datetime=now - timedelta(days=3))
     db.session.add_all([s1, s2])
-    db.session.commit()
+    db.session.flush()
 
     a1 = Participant(name="Alice", email="alice@test.com", session_id=s1.id)
     db.session.add(a1)
-    db.session.commit()
+    db.session.flush()
     s1.host_id = a1.id
 
     a2 = Participant(name="Alice", email="alice@test.com", session_id=s2.id)
     db.session.add(a2)
-    db.session.commit()
+    db.session.flush()
     s2.host_id = a2.id
 
     # ── User B: same-day activity only (should NOT count as repeat) ──────
     s3 = Session(title="User B Session", is_public=True, datetime=now - timedelta(hours=2))
     db.session.add(s3)
-    db.session.commit()
+    db.session.flush()
 
     b1 = Participant(name="Bob", email="bob@test.com", session_id=s3.id)
     db.session.add(b1)
-    db.session.commit()
+    db.session.flush()
     s3.host_id = b1.id
 
     c1 = Confirmation(participant_id=b1.id, session_id=s3.id, status="yes",
@@ -864,26 +885,26 @@ def seed_test_data():
     s4 = Session(title="User C Session 1", is_public=True, datetime=now - timedelta(days=12))
     s5 = Session(title="User C Session 2", is_public=True, datetime=now - timedelta(days=2))
     db.session.add_all([s4, s5])
-    db.session.commit()
+    db.session.flush()
 
     c_p1 = Participant(name="Carol", email="carol@test.com", session_id=s4.id)
     db.session.add(c_p1)
-    db.session.commit()
+    db.session.flush()
     s4.host_id = c_p1.id
 
     c_p2 = Participant(name="Carol", email="carol@test.com", session_id=s5.id)
     db.session.add(c_p2)
-    db.session.commit()
+    db.session.flush()
     s5.host_id = c_p2.id
 
     # ── User D: joined but no activity (not activated) ───────────────────
     s6 = Session(title="Host Session", is_public=True, datetime=now)
     db.session.add(s6)
-    db.session.commit()
+    db.session.flush()
 
     host = Participant(name="Host", email="host@test.com", session_id=s6.id)
     db.session.add(host)
-    db.session.commit()
+    db.session.flush()
     s6.host_id = host.id
 
     d1 = Participant(name="Dave", email="dave@test.com", session_id=s6.id)
@@ -892,7 +913,7 @@ def seed_test_data():
     # ── User E: confirmed (activated, not repeat) ─────────────────────────
     e1 = Participant(name="Eve", email="eve@test.com", session_id=s6.id)
     db.session.add(e1)
-    db.session.commit()
+    db.session.flush()
 
     conf_e = Confirmation(participant_id=e1.id, session_id=s6.id, status="yes",
                           created_at=now - timedelta(days=1))
@@ -902,112 +923,168 @@ def seed_test_data():
     flash("Test data seeded.", "success")
     return redirect(url_for("main.dashboard"))
 
-def _notify_waiters(session_hash):
-    """Wake up all SSE clients watching this session."""
-    with _session_waiters_lock:
-        waiters = _session_waiters.get(session_hash, [])
-        for w in waiters:
-            w.set()
+@main.route("/export-db")
+def export_db():
+    from flask import jsonify
+    from website.models import Participant, Session, Confirmation, Availability, GameVote
 
+    data = {
+        "sessions": [
+            {
+                "id": s.id, "title": s.title, "hash_id": s.hash_id,
+                "host_id": s.host_id, "final_time": s.final_time.isoformat() if s.final_time else None,
+                "chosen_game": s.chosen_game, "is_public": s.is_public,
+                "datetime": s.datetime.isoformat() if s.datetime else None,
+            }
+            for s in Session.query.all()
+        ],
+        "participants": [
+            {
+                "id": p.id, "name": p.name, "email": p.email,
+                "session_id": p.session_id, "token": p.token,
+            }
+            for p in Participant.query.all()
+        ],
+        "availability": [
+            {
+                "id": a.id, "session_id": a.session_id, "participant_id": a.participant_id,
+                "start_time": a.start_time.isoformat() if a.start_time else None,
+                "end_time": a.end_time.isoformat() if a.end_time else None,
+            }
+            for a in Availability.query.all()
+        ],
+        "confirmations": [
+            {
+                "id": c.id, "session_id": c.session_id,
+                "participant_id": c.participant_id, "status": c.status,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+            }
+            for c in Confirmation.query.all()
+        ],
+        "game_votes": [
+            {
+                "id": v.id, "session_id": v.session_id,
+                "participant_id": v.participant_id, "game_name": v.game_name,
+            }
+            for v in GameVote.query.all()
+        ],
+    }
+    return jsonify(data)
 
-def _sse_generate(session_hash):
-    import json as _json
-    from website.models import Session as S, GameVote, Confirmation
+def _reset_sequences():
+    """Reset PostgreSQL sequences after explicit-id inserts. No-op on SQLite."""
+    if db.engine.dialect.name != "postgresql":
+        return
+    with db.engine.connect() as conn:
+        for table, col in [
+            ("session", "id"),
+            ("participant", "id"),
+            ("availability", "id"),
+            ("confirmation", "id"),
+            ("game_vote", "id"),
+        ]:
+            conn.execute(text(
+                f"SELECT setval(pg_get_serial_sequence('{table}', '{col}'), "
+                f"COALESCE((SELECT MAX({col}) FROM {table}), 0) + 1, false)"
+            ))
+        conn.commit()
 
-    event = Event()
+@main.route("/import-db", methods=["GET", "POST"])
+def import_db():
+    if request.method == "GET":
+        return '''
+        <form method="POST" enctype="multipart/form-data">
+            <input type="file" name="file" accept=".json" required>
+            <button type="submit">Import</button>
+        </form>
+        '''
 
-    with _session_waiters_lock:
-        _session_waiters.setdefault(session_hash, []).append(event)
+    f = request.files.get("file")
+    if not f:
+        return "No file uploaded", 400
 
-    last_hash = None
-    last_keepalive = _time.time()
-    start = _time.time()
+    data = json.loads(f.read())
+    with db.engine.connect() as conn:
+        conn.execute(text("UPDATE session SET host_id = NULL"))
+        conn.commit()
 
-    try:
-        while True:
-            try:
-                db.session.expire_all()
-                db.session.close()
+    # Clear existing data in dependency order
+    GameVote.query.delete()
+    Confirmation.query.delete()
+    Availability.query.delete()
+    Participant.query.delete()
+    Session.query.delete()
+    db.session.commit()
 
-                with db.session.no_autoflush:
-                    gs = S.query.filter_by(hash_id=session_hash).first()
+    # Insert sessions without host_id first
+    for s in data.get("sessions", []):
+        db.session.add(Session(
+            id=s["id"], title=s["title"], hash_id=s["hash_id"],
+            host_id=None,  # ← set to None initially
+            chosen_game=s["chosen_game"],
+            is_public=s["is_public"],
+            final_time=datetime.fromisoformat(s["final_time"]) if s.get("final_time") else None,
+            datetime=datetime.fromisoformat(s["datetime"]) if s.get("datetime") else None,
+        ))
+    db.session.commit()
 
-                if gs is None:
-                    yield "event: gone\ndata: {}\n\n"
-                    return
+    # Insert participants
+    for p in data.get("participants", []):
+        db.session.add(Participant(
+            id=p["id"], name=p["name"], email=p["email"],
+            session_id=p["session_id"], token=p["token"],
+        ))
+    db.session.commit()
 
-                current_hash = _session_state_hash(gs)
+    # Now update host_id now that participants exist
+    for s in data.get("sessions", []):
+        if s.get("host_id"):
+            Session.query.filter_by(id=s["id"]).update({"host_id": s["host_id"]})
+    db.session.commit()
 
-                if current_hash != last_hash:
-                    last_hash = current_hash
+    # Re-insert availability
+    for a in data.get("availability", []):
+        db.session.add(Availability(
+            id=a["id"], session_id=a["session_id"], participant_id=a["participant_id"],
+            start_time=datetime.fromisoformat(a["start_time"]) if a["start_time"] else None,
+            end_time=datetime.fromisoformat(a["end_time"]) if a["end_time"] else None,
+        ))
+    db.session.commit()
 
-                    avail = {
-                        p.name: [
-                            {
-                                "start": b.start_time.isoformat(),
-                                "end": b.end_time.isoformat(),
-                            }
-                            for b in p.availabilities
-                            if b.start_time and b.end_time
-                        ]
-                        for p in gs.participants
-                    }
+    # Re-insert confirmations
+    for c in data.get("confirmations", []):
+        db.session.add(Confirmation(
+            id=c["id"], session_id=c["session_id"],
+            participant_id=c["participant_id"], status=c["status"],
+            created_at=datetime.fromisoformat(c["created_at"]) if c.get("created_at") else None,
+        ))
 
-                    votes = GameVote.query.filter_by(session_id=gs.id).all()
-                    tally = {}
-                    for v in votes:
-                        key = (v.game_name or "").strip().lower()
-                        display = (v.game_name or "").strip()
-                        tally[key] = {
-                            "name": display,
-                            "count": tally.get(key, {}).get("count", 0) + 1,
-                        }
+    # Re-insert game votes
+    for v in data.get("game_votes", []):
+        db.session.add(GameVote(
+            id=v["id"], session_id=v["session_id"],
+            participant_id=v["participant_id"], game_name=v["game_name"],
+        ))
+    db.session.commit()
 
-                    game_tally = sorted(tally.values(), key=lambda x: -x["count"])
+    # Reset sequences to avoid primary key collisions after explicit-id inserts
+    _reset_sequences()
 
-                    confs = Confirmation.query.filter_by(session_id=gs.id).all()
-                    conf_map = {}
-                    for c in confs:
-                        p = next(
-                            (x for x in gs.participants if x.id == c.participant_id),
-                            None,
-                        )
-                        if p:
-                            conf_map[p.name] = c.status
+    flash(f"Imported {len(data.get('sessions', []))} sessions and {len(data.get('participants', []))} participants.", "success")
+    return redirect(url_for("main.dashboard"))
 
-                    payload = _json.dumps({
-                        "availability": avail,
-                        "game_tally": game_tally,
-                        "chosen_game": gs.chosen_game,
-                        "final_time": (
-                            gs.final_time.isoformat() if gs.final_time else None
-                        ),
-                        "confirmations": conf_map,
-                        "participants": [p.name for p in gs.participants],
-                        "state_hash": current_hash,
-                    })
+@main.route("/fix-sequences")
+def fix_sequences():
+    _reset_sequences()
+    return "Sequences fixed!"
 
-                    yield f"event: state\ndata: {payload}\n\n"
-                    
-                now = _time.time()
-
-                if now - start >= _SSE_MAX_DURATION:
-                    yield "event: reconnect\ndata: {}\n\n"
-                    return
-
-                if now - last_keepalive >= _SSE_KEEPALIVE_EVERY:
-                    yield ": keepalive\n\n"
-                    last_keepalive = now
-
-            except Exception:
-                yield ": error\n\n"
-
-            # Wait for notify or timeout — releases thread/greenlet
-            event.wait(timeout=2.0)
-            event.clear()
-
-    finally:
-        with _session_waiters_lock:
-            waiters = _session_waiters.get(session_hash, [])
-            if event in waiters:
-                waiters.remove(event)
+@main.route("/cleanup-db")
+def cleanup_db():
+    junk_session_ids = [21, 22, 23, 24, 25, 26]
+    for sid in junk_session_ids:
+        s = Session.query.get(sid)
+        if s:
+            db.session.delete(s)
+    db.session.commit()
+    _reset_sequences()
+    return "Done! Junk sessions deleted and sequences fixed."

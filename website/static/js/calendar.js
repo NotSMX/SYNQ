@@ -61,6 +61,19 @@ document.addEventListener('DOMContentLoaded', function() {
     s.textContent = '.fc .fc-event-mirror { background-color: ' + myColor + '99 !important; border-color: transparent !important; }';
     document.head.appendChild(s);
 
+    function toLocalISOString(date) {
+        var off = date.getTimezoneOffset();
+        var absOff = Math.abs(off);
+        var sign = off <= 0 ? '+' : '-';
+        var pad = function(n) { return String(n).padStart(2, '0'); };
+        return date.getFullYear() + '-' +
+            pad(date.getMonth() + 1) + '-' +
+            pad(date.getDate()) + 'T' +
+            pad(date.getHours()) + ':' +
+            pad(date.getMinutes()) + ':' +
+            pad(date.getSeconds()) +
+            sign + pad(Math.floor(absOff / 60)) + ':' + pad(absOff % 60);
+    }
     var clearBtn = document.getElementById('clear-availability');
     if (clearBtn) {
         clearBtn.addEventListener('click', function() {
@@ -95,7 +108,8 @@ document.addEventListener('DOMContentLoaded', function() {
         selectMirror: false,
         selectOverlap: true,
         longPressDelay: 300,
-        selectLongPressDelay: 300,  
+        selectLongPressDelay: 300, 
+        timeZone: 'UTC', 
 
         select: function(info) {
             if (!sessionHash) return;
@@ -132,7 +146,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
             // --- AUTHENTICATED FLOW (Original backend save) ---
             var fd = new FormData();
-            fd.append('token', token); fd.append('start', info.startStr); fd.append('end', info.endStr);
+            fd.append('token', token);
+            fd.append('start', toLocalISOString(info.start));
+            fd.append('end', toLocalISOString(info.end));
             fetch('/session/' + sessionHash + '/add_availability', {
                 method: 'POST', body: fd, headers: { 'X-Requested-With': 'XMLHttpRequest' }
             })
@@ -178,15 +194,22 @@ document.addEventListener('DOMContentLoaded', function() {
             var fd = new FormData();
             fd.append('token', token); fd.append('start', info.event.startStr); fd.append('end', info.event.endStr);
             fetch('/session/' + sessionHash + '/remove_availability', {
-                method: 'POST', body: fd, headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                method: 'POST', body: oldFd, headers: { 'X-Requested-With': 'XMLHttpRequest' }
             })
             .then(r => r.json())
             .then(function(data) {
-                if (!data || data.ok === false) { alert("Failed to remove availability."); return; }
-                info.event.remove();
+                if (!data || data.ok === false) { info.revert(); return; }
+
+                var newFd = new FormData();
+                newFd.append('token', token);
+                newFd.append('start', toLocalISOString(info.event.start));
+                newFd.append('end', toLocalISOString(info.event.end));
+                return fetch('/session/' + sessionHash + '/add_availability', {
+                    method: 'POST', body: newFd, headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                });
             })
-            .catch(function() { info.event.remove(); });
-        }
+            .catch(function() { info.revert(); });
+        },
     });
 
     calendar.render();
