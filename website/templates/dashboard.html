@@ -243,16 +243,8 @@
     </div>
   </div>
 
-  <!-- Results table -->
-  <div class="panel mb-3 p-3">
-    <p class="section-label mb-2">Results</p>
-    <div id="exp-results-table">
-      <p style="color: rgba(255,255,255,0.3); font-size:0.85rem;">Loading…</p>
-    </div>
-  </div>
-
-  <!-- Controls -->
-  <div class="d-flex gap-2 flex-wrap justify-content-center">
+  <!-- Controls (above Results) -->
+  <div class="d-flex gap-2 flex-wrap justify-content-center mb-3">
     <a href="{{ url_for('main.experiment_export', format='csv') }}" class="btn btn-outline-primary btn-sm">
       ↓ Export CSV
     </a>
@@ -269,7 +261,211 @@
     </form>
   </div>
 
+  <!-- Results table -->
+  <div class="panel mb-3 p-3">
+    <p class="section-label mb-2">Results</p>
+    <div id="exp-results-table">
+      <p style="color: rgba(255,255,255,0.3); font-size:0.85rem;">Loading…</p>
+    </div>
+  </div>
+
+  <p id="exp-join-chart-hint" class="small text-center mb-2 mt-4" style="color: rgba(255,255,255,0.45);">
+    Bar chart shows only after someone <strong>joins</strong> with a recorded time — compares avg seconds (A vs B).
+  </p>
+  <div id="exp-join-chart-wrap" class="panel mb-3 p-3" style="display: none; max-width: 640px; margin-left: auto; margin-right: auto;">
+    <p class="section-label mb-2 text-center">Time to join — Condition A vs B (averages)</p>
+    <div style="position: relative; height: 280px;">
+      <canvas id="exp-join-time-chart" aria-label="Average time to join in seconds for A and B"></canvas>
+    </div>
+  </div>
+
+  <div id="exp-all-joins-chart-wrap" class="panel mb-3 p-3" style="display: none; max-width: 720px; margin-left: auto; margin-right: auto;">
+    <p class="section-label mb-2 text-center">All participants — time to join (each join)</p>
+    <div style="position: relative; height: 280px;" id="exp-all-joins-chart-container">
+      <canvas id="exp-all-joins-chart" aria-label="Bar for each participant join time"></canvas>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script>
+  var expJoinTimeChart = null;
+  var expAllJoinsChart = null;
+
+  function renderAllJoinsBarChart(data) {
+    var wrap = document.getElementById('exp-all-joins-chart-wrap');
+    var container = document.getElementById('exp-all-joins-chart-container');
+    var canvas = document.getElementById('exp-all-joins-chart');
+    if (!wrap || !canvas || typeof Chart === 'undefined') return;
+
+    var rows = data.filter(function(r) {
+      return r.joined && r.time_to_join_ms != null;
+    }).slice().sort(function(a, b) { return (a.id || 0) - (b.id || 0); });
+
+    if (rows.length === 0) {
+      wrap.style.display = 'none';
+      if (expAllJoinsChart) {
+        expAllJoinsChart.destroy();
+        expAllJoinsChart = null;
+      }
+      return;
+    }
+
+    wrap.style.display = 'block';
+    if (container) {
+      container.style.setProperty('--n-bars', String(rows.length));
+      container.style.height = Math.min(520, Math.max(180, rows.length * 36)) + 'px';
+    }
+
+    if (expAllJoinsChart) {
+      expAllJoinsChart.destroy();
+    }
+
+    var labels = rows.map(function(r) { return '#' + r.id + ' · Cond ' + r.condition; });
+    var secs = rows.map(function(r) { return r.time_to_join_ms / 1000; });
+    var colors = rows.map(function(r) {
+      return r.condition === 'A' ? 'rgba(0, 255, 255, 0.6)' : 'rgba(255, 0, 170, 0.6)';
+    });
+    var borders = rows.map(function(r) {
+      return r.condition === 'A' ? '#00ffff' : '#ff00aa';
+    });
+
+    expAllJoinsChart = new Chart(canvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: 'Seconds',
+          data: secs,
+          backgroundColor: colors,
+          borderColor: borders,
+          borderWidth: 1
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          title: {
+            display: true,
+            text: rows.length + ' participant(s) — lower is faster',
+            color: 'rgba(255,255,255,0.75)',
+            font: { size: 12 }
+          }
+        },
+        scales: {
+          x: {
+            beginAtZero: true,
+            title: { display: true, text: 'Seconds', color: '#aaa' },
+            ticks: { color: '#888' },
+            grid: { color: 'rgba(255,255,255,0.08)' }
+          },
+          y: {
+            ticks: { color: '#aaa', font: { size: 11 } },
+            grid: { display: false }
+          }
+        }
+      }
+    });
+  }
+
+  function renderJoinTimeBarChart(data) {
+    var wrap = document.getElementById('exp-join-chart-wrap');
+    var hint = document.getElementById('exp-join-chart-hint');
+    var canvas = document.getElementById('exp-join-time-chart');
+    if (!wrap || !canvas || typeof Chart === 'undefined') return;
+
+    var aJoined = data.filter(function(r) {
+      return r.condition === 'A' && r.joined && r.time_to_join_ms != null;
+    });
+    var bJoined = data.filter(function(r) {
+      return r.condition === 'B' && r.joined && r.time_to_join_ms != null;
+    });
+    var aSecs = aJoined.map(function(r) { return r.time_to_join_ms / 1000; });
+    var bSecs = bJoined.map(function(r) { return r.time_to_join_ms / 1000; });
+    var avgA = aSecs.length ? aSecs.reduce(function(x, y) { return x + y; }, 0) / aSecs.length : null;
+    var avgB = bSecs.length ? bSecs.reduce(function(x, y) { return x + y; }, 0) / bSecs.length : null;
+
+    if (!aSecs.length && !bSecs.length) {
+      wrap.style.display = 'none';
+      if (hint) hint.style.display = 'block';
+      if (expJoinTimeChart) {
+        expJoinTimeChart.destroy();
+        expJoinTimeChart = null;
+      }
+      var w2 = document.getElementById('exp-all-joins-chart-wrap');
+      if (w2) w2.style.display = 'none';
+      if (expAllJoinsChart) {
+        expAllJoinsChart.destroy();
+        expAllJoinsChart = null;
+      }
+      return;
+    }
+
+    wrap.style.display = 'block';
+    if (hint) hint.style.display = 'none';
+
+    if (expJoinTimeChart) {
+      expJoinTimeChart.destroy();
+    }
+
+    expJoinTimeChart = new Chart(canvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: [
+          'A — Calendar first (n=' + aSecs.length + ')',
+          'B — Vote first (n=' + bSecs.length + ')'
+        ],
+        datasets: [{
+          label: 'Avg time to join (s)',
+          data: [
+            avgA != null ? avgA : 0,
+            avgB != null ? avgB : 0
+          ],
+          backgroundColor: ['rgba(0, 255, 255, 0.55)', 'rgba(255, 0, 170, 0.55)'],
+          borderColor: ['#00ffff', '#ff00aa'],
+          borderWidth: 1
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#ccc' } },
+          title: {
+            display: true,
+            text: 'Joined participants only — lower is faster',
+            color: 'rgba(255,255,255,0.85)',
+            font: { size: 13 }
+          },
+          tooltip: {
+            callbacks: {
+              afterLabel: function(ctx) {
+                var i = ctx.dataIndex;
+                var n = i === 0 ? aSecs.length : bSecs.length;
+                if (n === 0) return 'No joins with timing yet';
+                return 'Average of ' + n + ' join(s)';
+              }
+            }
+          }
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            title: { display: true, text: 'Seconds', color: '#aaa' },
+            ticks: { color: '#888' },
+            grid: { color: 'rgba(255,255,255,0.08)' }
+          },
+          x: {
+            ticks: { color: '#aaa', maxRotation: 0 },
+            grid: { display: false }
+          }
+        }
+      }
+    });
+  }
+
   function loadExpResults() {
     fetch('/experiment/results')
       .then(r => r.json())
@@ -296,6 +492,9 @@
           : null;
         document.getElementById('exp-avg-time').textContent =
           avgTime != null ? (avgTime / 1000).toFixed(1) + 's' : '—';
+
+        renderJoinTimeBarChart(data);
+        renderAllJoinsBarChart(data);
 
         if (data.length === 0) {
           document.getElementById('exp-results-table').innerHTML =
@@ -325,6 +524,10 @@
       .catch(function() {
         document.getElementById('exp-results-table').innerHTML =
           '<p style="color:#f87171;font-size:0.85rem;">Failed to load results.</p>';
+        var w = document.getElementById('exp-join-chart-wrap');
+        if (w) w.style.display = 'none';
+        var w2 = document.getElementById('exp-all-joins-chart-wrap');
+        if (w2) w2.style.display = 'none';
       });
   }
 
