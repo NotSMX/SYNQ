@@ -1313,8 +1313,16 @@ def experiment_export():
 @main.route("/experiment/reset_participants", methods=["POST"])
 def experiment_reset_participants():
     """Delete participants from the experiment session only. Keeps result rows."""
+    from website.models import ExperimentResult  # noqa: PLC0415
     exp_session = Session.query.filter_by(title="__experiment__").first()
     if exp_session:
+        # Null out FK references before deleting participants so result rows
+        # (and their timing data) are preserved.
+        db.session.execute(
+            text("UPDATE experiment_result SET participant_id = NULL WHERE participant_id IN "
+                 "(SELECT id FROM participant WHERE session_id = :sid)"),
+            {"sid": exp_session.id}
+        )
         GameVote.query.filter_by(session_id=exp_session.id).delete()
         Availability.query.filter_by(session_id=exp_session.id).delete()
         Participant.query.filter_by(session_id=exp_session.id).delete()
@@ -1327,12 +1335,13 @@ def experiment_reset_participants():
 def experiment_reset_all():
     """Full reset: delete participants AND all result rows."""
     from website.models import ExperimentResult  # noqa: PLC0415
+    # Delete result rows first — they hold a FK to participant
+    deleted = ExperimentResult.query.delete()
     exp_session = Session.query.filter_by(title="__experiment__").first()
     if exp_session:
         GameVote.query.filter_by(session_id=exp_session.id).delete()
         Availability.query.filter_by(session_id=exp_session.id).delete()
         Participant.query.filter_by(session_id=exp_session.id).delete()
-    deleted = ExperimentResult.query.delete()
     db.session.commit()
     flash(f"Full reset — {deleted} result(s) deleted.", "success")
     return redirect(url_for("main.dashboard"))
