@@ -465,11 +465,11 @@ def confirm(session_id, token):
         session_id=session_id, token=token
     ).first_or_404()
     status = request.form.get("status")
-
+    
     confirmation = Confirmation.query.filter_by(
         participant_id=participant.id, session_id=session_id
     ).first()
-
+    
     if not confirmation:
         confirmation = Confirmation(
             participant_id=participant.id, session_id=session_id, status=status
@@ -538,7 +538,7 @@ def join_and_vote(session_hash):
             session_id=game_session.id, participant_id=participant.id, game_name=game_name
         )
         db.session.add(vote)
-        
+    
     db.session.commit()
     
     # Notify user with their personal link
