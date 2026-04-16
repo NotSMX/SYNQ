@@ -152,6 +152,18 @@ class ExperimentResult(db.Model):
         db.DateTime(timezone=True), nullable=False,
         default=lambda: datetime.now(timezone.utc)
     )
+    click_count = db.Column(db.Integer, default=0)
+    scroll_depth = db.Column(db.Float, default=0.0)
+    first_interaction_ms = db.Column(db.Integer, nullable=True)
+    used_calendar = db.Column(db.Boolean, default=False)
+    typed_game = db.Column(db.Boolean, default=False)
+
+    # Post-experiment feedback fields
+    ease_of_use = db.Column(db.Integer, nullable=True)
+    layout_clarity = db.Column(db.Integer, nullable=True)
+    noticed_first = db.Column(db.String(20), nullable=True)
+    real_use_likelihood = db.Column(db.Integer, nullable=True)
+    feedback_text = db.Column(db.Text, nullable=True)
 
     def __repr__(self):
         return f"<ExperimentResult condition={self.condition} joined={self.joined}>"

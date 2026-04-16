@@ -128,6 +128,8 @@ document.addEventListener('DOMContentLoaded', function() {
         select: function(info) {
             if (!sessionHash && !window.isExperiment) return;
             
+            window.usedCalendar = true;
+
             if (window.isExperiment) {
                 window.tempBlocks.push({ start: info.startStr, end: info.endStr });
 
@@ -224,6 +226,7 @@ document.addEventListener('DOMContentLoaded', function() {
         },
 
         eventClick: function(info) {
+            window.usedCalendar = true;
             if (window.matchMedia('(pointer: coarse)').matches) return;
 
             // Check if it's "mine" in any of the three possible ways
@@ -262,6 +265,7 @@ document.addEventListener('DOMContentLoaded', function() {
         },
         
         eventDrop: function(info) {
+            window.usedCalendar = true;
             if (window.isExperiment) {
                 // Use extendedProps keys for matching — they're set at create-time
                 // and avoid any UTC-vs-local-offset mismatch with .toISOString().

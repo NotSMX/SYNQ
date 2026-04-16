@@ -196,6 +196,18 @@
   }
   </script>
 
+    <!-- General Feedback Panel -->
+  <hr class="section-divider">
+    <p class="section-label">General Feedback</p>
+    <div class="panel mb-3 p-3">
+      <div class="d-flex align-items-center justify-content-between mb-2">
+        <h4 class="mb-0">Footer feedback submissions</h4>
+        <button class="btn btn-outline-secondary btn-sm" onclick="toggleFeedback(this)">Show</button>
+      </div>
+      <p class="text-center small mb-0" style="color:#aaa;" id="feedback-count">Loading…</p>
+      <div id="feedback-table" style="display:none; margin-top:1rem;"></div>
+  </div>
+  
   <!-- Experiment Panel -->
   <hr class="section-divider">
   <p class="section-label">Experiment — Join Flow A/B Test</p>
@@ -470,64 +482,133 @@
     fetch('/experiment/results')
       .then(r => r.json())
       .then(function(data) {
-        var aRows = data.filter(r => r.condition === 'A');
-        var bRows = data.filter(r => r.condition === 'B');
-        var aJoins = aRows.filter(r => r.joined).length;
-        var bJoins = bRows.filter(r => r.joined).length;
+
+        // -------------------------
+        // Split groups
+        // -------------------------
+        var a = data.filter(r => r.condition === 'A');
+        var b = data.filter(r => r.condition === 'B');
+
+        function safeAvg(arr, key) {
+          var vals = arr.map(x => x[key]).filter(v => v != null);
+          return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+        }
+
+        function pct(arr, key) {
+          if (!arr.length) return 0;
+          return Math.round(arr.filter(x => x[key]).length / arr.length * 100);
+        }
+
+        // -------------------------
+        // JOIN RATE
+        // -------------------------
+        var aJoins = a.filter(r => r.joined).length;
+        var bJoins = b.filter(r => r.joined).length;
 
         document.getElementById('exp-a-joins').textContent =
-          aRows.length ? Math.round(aJoins / aRows.length * 100) + '%' : '—';
-        document.getElementById('exp-a-total').textContent =
-          aJoins + ' joined / ' + aRows.length + ' total';
+          a.length ? Math.round(aJoins / a.length * 100) + '%' : '—';
 
         document.getElementById('exp-b-joins').textContent =
-          bRows.length ? Math.round(bJoins / bRows.length * 100) + '%' : '—';
+          b.length ? Math.round(bJoins / b.length * 100) + '%' : '—';
+
+        document.getElementById('exp-a-total').textContent =
+          `${aJoins}/${a.length} joined`;
+
         document.getElementById('exp-b-total').textContent =
-          bJoins + ' joined / ' + bRows.length + ' total';
+          `${bJoins}/${b.length} joined`;
 
-        var timings = data.filter(r => r.joined && r.time_to_join_ms != null)
-                          .map(r => r.time_to_join_ms);
-        var avgTime = timings.length
-          ? Math.round(timings.reduce((a,b) => a+b, 0) / timings.length)
-          : null;
+        // -------------------------
+        // AVG TIME TO JOIN
+        // -------------------------
+        var avgTime = safeAvg(data.filter(r => r.joined), 'time_to_join_ms');
         document.getElementById('exp-avg-time').textContent =
-          avgTime != null ? (avgTime / 1000).toFixed(1) + 's' : '—';
+          avgTime ? (avgTime / 1000).toFixed(1) + 's' : '—';
 
+        // -------------------------
+        // NEW KPI EXTENSIONS
+        // -------------------------
+        var avgClicks = safeAvg(data, 'click_count');
+        var avgScroll = safeAvg(data, 'scroll_depth');
+        var firstInteractionAvg = safeAvg(data, 'first_interaction_time');
+
+        // optionally create new DOM fields if you want:
+        console.log("Avg clicks:", avgClicks);
+        console.log("Avg scroll:", avgScroll);
+        console.log("First interaction:", firstInteractionAvg);
+
+        // -------------------------
+        // BEHAVIOR COMPARISON (NEW)
+        // -------------------------
+        var calendarUsageA = pct(a, 'used_calendar');
+        var calendarUsageB = pct(b, 'used_calendar');
+
+        var typedGameA = pct(a, 'typed_game');
+        var typedGameB = pct(b, 'typed_game');
+
+        console.log("Calendar usage A/B:", calendarUsageA, calendarUsageB);
+        console.log("Typed game A/B:", typedGameA, typedGameB);
+
+        // -------------------------
+        // CHARTS (unchanged calls)
+        // -------------------------
         renderJoinTimeBarChart(data);
         renderAllJoinsBarChart(data);
 
+        // -------------------------
+        // TABLE (expanded)
+        // -------------------------
         if (data.length === 0) {
           document.getElementById('exp-results-table').innerHTML =
-            '<p style="color:rgba(255,255,255,0.3);font-size:0.85rem;">No results yet.</p>';
+            '<p style="color:rgba(255,255,255,0.3)">No results yet.</p>';
           return;
         }
-        var html = '<table class="table sessions-table"><thead><tr>' +
-          '<th>#</th><th>Condition</th><th>Joined</th>' +
-          '<th>Time to join</th><th>Recorded at</th>' +
-          '</tr></thead><tbody>';
+
+        var html = `
+          <table class="table sessions-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Cond</th>
+              <th>Joined</th>
+              <th>Time</th>
+              <th>Clicks</th>
+              <th>Scroll</th>
+              <th>Calendar</th>
+              <th>Typed Game</th>
+              <th>Created</th>
+            </tr>
+          </thead>
+          <tbody>
+        `;
+
         data.slice().reverse().forEach(function(r, i) {
-          var time = r.time_to_join_ms != null
-            ? (r.time_to_join_ms / 1000).toFixed(1) + 's' : '—';
-          var joined = r.joined
-            ? '<span class="status-pill s-yes">Yes</span>'
-            : '<span class="status-pill s-no">No</span>';
-          var ts = r.created_at ? new Date(r.created_at).toLocaleString() : '—';
-          html += '<tr><td>' + (data.length - i) + '</td>' +
-            '<td><strong>' + r.condition + '</strong></td>' +
-            '<td>' + joined + '</td>' +
-            '<td>' + time + '</td>' +
-            '<td style="font-size:0.8rem;color:#888;">' + ts + '</td></tr>';
+          html += `
+            <tr>
+              <td>${data.length - i}</td>
+              <td><b>${r.condition}</b></td>
+              <td>
+                <span class="status-pill ${r.joined ? 's-yes' : 's-no'}">
+                  ${r.joined ? 'Yes' : 'No'}
+                </span>
+              </td>
+              <td>${r.time_to_join_ms ? (r.time_to_join_ms/1000).toFixed(1)+'s' : '—'}</td>
+              <td>${r.click_count ?? '—'}</td>
+              <td>${r.scroll_depth ? Math.round(r.scroll_depth*100)+'%' : '—'}</td>
+              <td>${r.used_calendar ? 'Yes' : 'No'}</td>
+              <td>${r.typed_game ? 'Yes' : 'No'}</td>
+              <td style="font-size:0.8rem;color:#888;">
+                ${r.created_at ? new Date(r.created_at).toLocaleString() : '—'}
+              </td>
+            </tr>
+          `;
         });
-        html += '</tbody></table>';
+
+        html += `</tbody></table>`;
         document.getElementById('exp-results-table').innerHTML = html;
       })
       .catch(function() {
         document.getElementById('exp-results-table').innerHTML =
-          '<p style="color:#f87171;font-size:0.85rem;">Failed to load results.</p>';
-        var w = document.getElementById('exp-join-chart-wrap');
-        if (w) w.style.display = 'none';
-        var w2 = document.getElementById('exp-all-joins-chart-wrap');
-        if (w2) w2.style.display = 'none';
+          '<p style="color:#f87171">Failed to load results</p>';
       });
   }
 
@@ -565,6 +646,127 @@
   }
 
   loadExpResults();
+  </script>
+
+  <!-- Experiment Feedback Panel -->
+  <hr class="section-divider">
+  <p class="section-label">Experiment Feedback</p>
+  <div class="panel mb-3 p-3">
+    <div class="d-flex align-items-center justify-content-between mb-2">
+      <h4 class="mb-0">Post-experiment survey responses</h4>
+      <button class="btn btn-outline-secondary btn-sm" onclick="toggleExpFeedback(this)">Show</button>
+    </div>
+    <p class="text-center small mb-0" style="color:#aaa;" id="exp-feedback-count">Loading…</p>
+    <div id="exp-feedback-table" style="display:none; margin-top:1rem;"></div>
+  </div>
+
+  <script>
+  // ── General Feedback ──────────────────────────────────────────────────────
+  function toggleFeedback(btn) {
+    var el = document.getElementById('feedback-table');
+    var hidden = el.style.display === 'none';
+    el.style.display = hidden ? 'block' : 'none';
+    btn.textContent = hidden ? 'Hide' : 'Show';
+    if (hidden && el.innerHTML === '') loadFeedback();
+  }
+
+  function loadFeedback() {
+    fetch('/feedback/data')
+      .then(r => r.json())
+      .then(function(data) {
+        document.getElementById('feedback-count').textContent =
+          data.length + ' submission(s)';
+        if (!data.length) {
+          document.getElementById('feedback-table').innerHTML =
+            '<p class="text-center small" style="color:#aaa;">No feedback yet.</p>';
+          return;
+        }
+        var html = `<table class="table sessions-table"><thead><tr>
+          <th>#</th><th>Ease</th><th>Improvement</th><th>Goal?</th>
+          <th>Return</th><th>Recommend</th><th>Comments</th><th>Date</th>
+        </tr></thead><tbody>`;
+        data.slice().reverse().forEach(function(f, i) {
+          html += `<tr>
+            <td>${data.length - i}</td>
+            <td>${f.ease_of_use ?? '—'}</td>
+            <td class="wrap-text">${f.improvement || '—'}</td>
+            <td>${f.accomplished_goal || '—'}</td>
+            <td>${f.return_likelihood ?? '—'}</td>
+            <td>${f.recommend_likelihood ?? '—'}</td>
+            <td class="wrap-text">${f.additional_comments || '—'}</td>
+            <td style="font-size:0.8rem;color:#888;">${f.created_at ? new Date(f.created_at).toLocaleString() : '—'}</td>
+          </tr>`;
+        });
+        html += '</tbody></table>';
+        document.getElementById('feedback-table').innerHTML = html;
+      })
+      .catch(function() {
+        document.getElementById('feedback-table').innerHTML =
+          '<p style="color:#f87171">Failed to load feedback.</p>';
+      });
+  }
+
+  // Count on page load (don't show table yet)
+  fetch('/feedback/data').then(r => r.json()).then(function(data) {
+    document.getElementById('feedback-count').textContent = data.length + ' submission(s)';
+  }).catch(function() {
+    document.getElementById('feedback-count').textContent = 'Could not load';
+  });
+
+  // ── Experiment Feedback ───────────────────────────────────────────────────
+  function toggleExpFeedback(btn) {
+    var el = document.getElementById('exp-feedback-table');
+    var hidden = el.style.display === 'none';
+    el.style.display = hidden ? 'block' : 'none';
+    btn.textContent = hidden ? 'Hide' : 'Show';
+    if (hidden && el.innerHTML === '') loadExpFeedback();
+  }
+
+  function loadExpFeedback() {
+    fetch('/experiment/results')
+      .then(r => r.json())
+      .then(function(data) {
+        var withFeedback = data.filter(r =>
+          r.ease_of_use != null || r.layout_clarity != null || r.feedback_text
+        );
+        document.getElementById('exp-feedback-count').textContent =
+          withFeedback.length + ' response(s) with feedback';
+        if (!withFeedback.length) {
+          document.getElementById('exp-feedback-table').innerHTML =
+            '<p class="text-center small" style="color:#aaa;">No experiment feedback yet.</p>';
+          return;
+        }
+        var html = `<table class="table sessions-table"><thead><tr>
+          <th>#</th><th>Cond</th><th>Ease</th><th>Layout Clarity</th>
+          <th>Noticed First</th><th>Real Use</th><th>Improvement</th>
+        </tr></thead><tbody>`;
+        withFeedback.slice().reverse().forEach(function(r, i) {
+          html += `<tr>
+            <td>${r.id}</td>
+            <td><b>${r.condition}</b></td>
+            <td>${r.ease_of_use ?? '—'}</td>
+            <td>${r.layout_clarity ?? '—'}</td>
+            <td>${r.noticed_first || '—'}</td>
+            <td>${r.real_use_likelihood ?? '—'}</td>
+            <td class="wrap-text">${r.feedback_text || '—'}</td>
+          </tr>`;
+        });
+        html += '</tbody></table>';
+        document.getElementById('exp-feedback-table').innerHTML = html;
+      })
+      .catch(function() {
+        document.getElementById('exp-feedback-table').innerHTML =
+          '<p style="color:#f87171">Failed to load experiment feedback.</p>';
+      });
+  }
+
+  // Count on page load
+  fetch('/experiment/results').then(r => r.json()).then(function(data) {
+    var c = data.filter(r => r.ease_of_use != null || r.layout_clarity != null || r.feedback_text).length;
+    document.getElementById('exp-feedback-count').textContent = c + ' response(s) with feedback';
+  }).catch(function() {
+    document.getElementById('exp-feedback-count').textContent = 'Could not load';
+  });
   </script>
 
   <!-- Testing tools -->
