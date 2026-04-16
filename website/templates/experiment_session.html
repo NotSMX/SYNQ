@@ -332,18 +332,22 @@ let calendarSectionMs = 0, gameSectionMs = 0;
 let _calEnter = null, _gameEnter = null;
 
 const _sectionObs = new IntersectionObserver((entries) => {
-    if (!window.consentGiven) return;
     entries.forEach(entry => {
         const now = Date.now();
         const isCalendar = entry.target.id === 'calendar-section';
         const isGame     = entry.target.id === 'game-tally-list';
+        if (!window.consentGiven) {
+            if (isCalendar && entry.isIntersecting) { _calEnter = null; }
+            if (isGame && entry.isIntersecting) { _gameEnter = null; }
+            return;
+        }
         if (isCalendar) {
-            if (entry.isIntersecting) { _calEnter = now; }
-            else if (_calEnter) { calendarSectionMs += now - _calEnter; _calEnter = null; }
+            if (entry.isIntersecting && !_calEnter) { _calEnter = now; }
+            else if (!entry.isIntersecting && _calEnter) { calendarSectionMs += now - _calEnter; _calEnter = null; }
         }
         if (isGame) {
-            if (entry.isIntersecting) { _gameEnter = now; }
-            else if (_gameEnter) { gameSectionMs += now - _gameEnter; _gameEnter = null; }
+            if (entry.isIntersecting && !_gameEnter) { _gameEnter = now; }
+            else if (!entry.isIntersecting && _gameEnter) { gameSectionMs += now - _gameEnter; _gameEnter = null; }
         }
     });
 }, { threshold: 0.3 });
@@ -356,6 +360,24 @@ document.addEventListener('visibilitychange', () => {
     if (_calEnter)  { calendarSectionMs  += now - _calEnter;  _calEnter  = null; }
     if (_gameEnter) { gameSectionMs       += now - _gameEnter; _gameEnter = null; }
 });
+
+function _refreshSectionVisibility() {
+    if (!window.consentGiven) return;
+    const now = Date.now();
+    const calEl = document.getElementById('calendar-section');
+    const gameEl = document.getElementById('game-tally-list');
+    const inView = (el) => {
+        if (!el) return false;
+        const rect = el.getBoundingClientRect();
+        return rect.top < window.innerHeight && rect.bottom > 0;
+    };
+    if (calEl && !_calEnter && inView(calEl)) {
+        _calEnter = now;
+    }
+    if (gameEl && !_gameEnter && inView(gameEl)) {
+        _gameEnter = now;
+    }
+}
 
 // ── Rage-click detection ───────────────────────────────────────────────────
 let rageClickCount = 0;
@@ -399,6 +421,7 @@ function _stampMetrics() {
     document.getElementById('click-count-input').value          = clickCount;
     document.getElementById('scroll-depth-input').value         = maxScroll;
     document.getElementById('time-to-join-input').value         = _expStartMs ? now - _expStartMs : -1;
+    document.getElementById('temp-availability-input').value    = JSON.stringify(window.tempBlocks || []);
     document.getElementById('first-interaction-input').value    = window.firstInteractionTime || -1;
     document.getElementById('used-calendar-input').value        = window.usedCalendar ? 1 : 0;
     document.getElementById('typed-game-input').value           = window.typedGame ? 1 : 0;
@@ -479,6 +502,7 @@ function acceptConsent() {
     }, 350);
     window.consentGiven = true;
     _expStartMs = Date.now();   // ← timer starts HERE, only after agreement
+    _refreshSectionVisibility();
 }
 
 document.addEventListener("DOMContentLoaded", function () {

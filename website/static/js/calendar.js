@@ -132,6 +132,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             if (window.isExperiment) {
                 window.tempBlocks.push({ start: info.startStr, end: info.endStr });
+                document.dispatchEvent(new CustomEvent('calendar:block_added'));
 
                 calendar.addEvent({
                     title: myName,

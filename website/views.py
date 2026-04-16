@@ -108,6 +108,14 @@ def _ensure_game_election_schema():
             ("experiment_result", "first_interaction_ms", "INTEGER"),
             ("experiment_result", "used_calendar", "INTEGER"),
             ("experiment_result", "typed_game", "INTEGER"),
+            ("experiment_result", "calendar_block_count", "INTEGER"),
+            ("experiment_result", "calendar_section_ms", "INTEGER"),
+            ("experiment_result", "game_section_ms", "INTEGER"),
+            ("experiment_result", "time_to_calendar_ms", "INTEGER"),
+            ("experiment_result", "time_to_game_ms", "INTEGER"),
+            ("experiment_result", "rage_click_count", "INTEGER"),
+            ("experiment_result", "form_focus_ms", "INTEGER"),
+            ("experiment_result", "nudge_hover", "INTEGER"),
             ("experiment_result", "ease_of_use", "INTEGER"),
             ("experiment_result", "layout_clarity", "INTEGER"),
             ("experiment_result", "noticed_first", "VARCHAR(20)"),
@@ -1248,6 +1256,14 @@ def experiment_join():
     first_interaction_ms = request.form.get("first_interaction_ms", type=int, default=-1)
     used_calendar = request.form.get("used_calendar", type=int, default=0)
     typed_game = request.form.get("typed_game", type=int, default=0)
+    calendar_block_count = request.form.get("calendar_block_count", type=int, default=0)
+    calendar_section_ms = request.form.get("calendar_section_ms", type=int, default=0)
+    game_section_ms = request.form.get("game_section_ms", type=int, default=0)
+    time_to_calendar_ms = request.form.get("time_to_calendar_ms", type=int)
+    time_to_game_ms = request.form.get("time_to_game_ms", type=int)
+    rage_click_count = request.form.get("rage_click_count", type=int, default=0)
+    form_focus_ms = request.form.get("form_focus_ms", type=int, default=0)
+    nudge_hover = request.form.get("nudge_hover", type=int, default=0)
 
     if not name:
         flash("Please enter your name.", "warning")
@@ -1308,7 +1324,15 @@ def experiment_join():
                         scroll_depth = :scroll,
                         first_interaction_ms = :first_int,
                         used_calendar = :used_cal,
-                        typed_game = :typed_g
+                        typed_game = :typed_g,
+                        calendar_block_count = :cal_blocks,
+                        calendar_section_ms = :cal_ms,
+                        game_section_ms = :game_ms,
+                        time_to_calendar_ms = :ttcal,
+                        time_to_game_ms = :ttgame,
+                        rage_click_count = :rage,
+                        form_focus_ms = :focus_ms,
+                        nudge_hover = :nudge
                     WHERE id = :rid
                 """),
                 {
@@ -1319,6 +1343,14 @@ def experiment_join():
                     "first_int": first_interaction_ms,
                     "used_cal": bool(used_calendar),
                     "typed_g": bool(typed_game),
+                    "cal_blocks": calendar_block_count,
+                    "cal_ms": calendar_section_ms,
+                    "game_ms": game_section_ms,
+                    "ttcal": time_to_calendar_ms if time_to_calendar_ms and time_to_calendar_ms >= 0 else None,
+                    "ttgame": time_to_game_ms if time_to_game_ms and time_to_game_ms >= 0 else None,
+                    "rage": rage_click_count,
+                    "focus_ms": form_focus_ms,
+                    "nudge": bool(nudge_hover),
                     "rid": result_row[0]
                 }
             )
@@ -1334,6 +1366,14 @@ def experiment_join():
             first_interaction_ms=first_interaction_ms,
             used_calendar=used_calendar,
             typed_game=typed_game,
+            calendar_block_count=calendar_block_count,
+            calendar_section_ms=calendar_section_ms,
+            game_section_ms=game_section_ms,
+            time_to_calendar_ms=time_to_calendar_ms if time_to_calendar_ms and time_to_calendar_ms >= 0 else None,
+            time_to_game_ms=time_to_game_ms if time_to_game_ms and time_to_game_ms >= 0 else None,
+            rage_click_count=rage_click_count,
+            form_focus_ms=form_focus_ms,
+            nudge_hover=bool(nudge_hover),
         ))
     db.session.commit()
     
@@ -1357,11 +1397,57 @@ def experiment_no_join():
     from website.models import ExperimentSession, ExperimentResult  # noqa: PLC0415
     link_token = request.form.get("link_token", "").strip()
     elapsed = request.form.get("time_to_join_ms", type=int)
+    click_count = request.form.get("click_count", type=int, default=0)
+    scroll_depth = request.form.get("scroll_depth", type=float, default=0.0)
+    first_interaction_ms = request.form.get("first_interaction_ms", type=int)
+    used_calendar = request.form.get("used_calendar", type=int, default=0)
+    typed_game = request.form.get("typed_game", type=int, default=0)
+    calendar_block_count = request.form.get("calendar_block_count", type=int, default=0)
+    calendar_section_ms = request.form.get("calendar_section_ms", type=int, default=0)
+    game_section_ms = request.form.get("game_section_ms", type=int, default=0)
+    time_to_calendar_ms = request.form.get("time_to_calendar_ms", type=int)
+    time_to_game_ms = request.form.get("time_to_game_ms", type=int)
+    rage_click_count = request.form.get("rage_click_count", type=int, default=0)
+    form_focus_ms = request.form.get("form_focus_ms", type=int, default=0)
+    nudge_hover = request.form.get("nudge_hover", type=int, default=0)
 
     if link_token:
         db.session.execute(
-            text("UPDATE experiment_result SET time_to_join_ms=:ms WHERE link_token=:token AND joined=false"),
-            {"ms": elapsed, "token": link_token}
+            text("""
+                UPDATE experiment_result
+                SET time_to_join_ms      = :ms,
+                    click_count          = :clicks,
+                    scroll_depth         = :scroll,
+                    first_interaction_ms = :first_int,
+                    used_calendar        = :used_cal,
+                    typed_game           = :typed_g,
+                    calendar_block_count = :cal_blocks,
+                    calendar_section_ms  = :cal_ms,
+                    game_section_ms      = :game_ms,
+                    time_to_calendar_ms  = :ttcal,
+                    time_to_game_ms      = :ttgame,
+                    rage_click_count     = :rage,
+                    form_focus_ms        = :focus_ms,
+                    nudge_hover          = :nudge
+                WHERE link_token = :token AND joined = false
+            """),
+            {
+                "ms": elapsed,
+                "clicks": click_count,
+                "scroll": scroll_depth,
+                "first_int": first_interaction_ms if first_interaction_ms and first_interaction_ms >= 0 else None,
+                "used_cal": bool(used_calendar),
+                "typed_g": bool(typed_game),
+                "cal_blocks": calendar_block_count,
+                "cal_ms": calendar_section_ms,
+                "game_ms": game_section_ms,
+                "ttcal": time_to_calendar_ms if time_to_calendar_ms and time_to_calendar_ms >= 0 else None,
+                "ttgame": time_to_game_ms if time_to_game_ms and time_to_game_ms >= 0 else None,
+                "rage": rage_click_count,
+                "focus_ms": form_focus_ms,
+                "nudge": bool(nudge_hover),
+                "token": link_token,
+            }
         )
         db.session.commit()
     else:
@@ -1373,6 +1459,19 @@ def experiment_no_join():
             participant_id=None,
             joined=False,
             time_to_join_ms=elapsed,
+            click_count=click_count,
+            scroll_depth=scroll_depth,
+            first_interaction_ms=first_interaction_ms if first_interaction_ms and first_interaction_ms >= 0 else None,
+            used_calendar=bool(used_calendar),
+            typed_game=bool(typed_game),
+            calendar_block_count=calendar_block_count,
+            calendar_section_ms=calendar_section_ms,
+            game_section_ms=game_section_ms,
+            time_to_calendar_ms=time_to_calendar_ms if time_to_calendar_ms and time_to_calendar_ms >= 0 else None,
+            time_to_game_ms=time_to_game_ms if time_to_game_ms and time_to_game_ms >= 0 else None,
+            rage_click_count=rage_click_count,
+            form_focus_ms=form_focus_ms,
+            nudge_hover=bool(nudge_hover),
         ))
         db.session.commit()
     return jsonify({"ok": True})
@@ -1389,19 +1488,68 @@ def experiment_export():
     results = ExperimentResult.query.order_by(ExperimentResult.created_at).all()
 
     if fmt == "json":
-        data = [{"id": r.id, "condition": r.condition, "participant_id": r.participant_id,
-                 "joined": r.joined, "time_to_join_ms": r.time_to_join_ms,
-                 "created_at": r.created_at.isoformat() if r.created_at else None}
-                for r in results]
+        data = [{
+            "id": r.id,
+            "condition": r.condition,
+            "participant_id": r.participant_id,
+            "joined": r.joined,
+            "time_to_join_ms": r.time_to_join_ms,
+            "click_count": r.click_count,
+            "scroll_depth": r.scroll_depth,
+            "first_interaction_ms": r.first_interaction_ms,
+            "used_calendar": r.used_calendar,
+            "typed_game": r.typed_game,
+            "calendar_block_count": getattr(r, 'calendar_block_count', None),
+            "calendar_section_ms": getattr(r, 'calendar_section_ms', None),
+            "game_section_ms": getattr(r, 'game_section_ms', None),
+            "time_to_calendar_ms": getattr(r, 'time_to_calendar_ms', None),
+            "time_to_game_ms": getattr(r, 'time_to_game_ms', None),
+            "rage_click_count": getattr(r, 'rage_click_count', None),
+            "form_focus_ms": getattr(r, 'form_focus_ms', None),
+            "nudge_hover": getattr(r, 'nudge_hover', None),
+            "ease_of_use": getattr(r, 'ease_of_use', None),
+            "layout_clarity": getattr(r, 'layout_clarity', None),
+            "noticed_first": getattr(r, 'noticed_first', None),
+            "real_use_likelihood": getattr(r, 'real_use_likelihood', None),
+            "feedback_text": getattr(r, 'feedback_text', None),
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        } for r in results]
         return Response(json.dumps(data, indent=2), mimetype="application/json",
                         headers={"Content-Disposition": "attachment; filename=experiment_results.json"})
 
+    EXPORT_FIELDS = [
+        "id", "condition", "participant_id", "joined",
+        "time_to_join_ms", "click_count", "scroll_depth", "first_interaction_ms",
+        "used_calendar", "typed_game",
+        "calendar_block_count", "calendar_section_ms", "game_section_ms",
+        "time_to_calendar_ms", "time_to_game_ms",
+        "rage_click_count", "form_focus_ms", "nudge_hover",
+        "ease_of_use", "layout_clarity", "noticed_first",
+        "real_use_likelihood", "feedback_text", "created_at",
+    ]
     out = io.StringIO()
     w = csv.writer(out)
-    w.writerow(["id", "condition", "participant_id", "joined", "time_to_join_ms", "created_at"])
+    w.writerow(EXPORT_FIELDS)
     for r in results:
-        w.writerow([r.id, r.condition, r.participant_id, r.joined, r.time_to_join_ms,
-                    r.created_at.isoformat() if r.created_at else ""])
+        w.writerow([
+            r.id, r.condition, r.participant_id, r.joined,
+            r.time_to_join_ms, r.click_count, r.scroll_depth, r.first_interaction_ms,
+            r.used_calendar, r.typed_game,
+            getattr(r, 'calendar_block_count', None),
+            getattr(r, 'calendar_section_ms', None),
+            getattr(r, 'game_section_ms', None),
+            getattr(r, 'time_to_calendar_ms', None),
+            getattr(r, 'time_to_game_ms', None),
+            getattr(r, 'rage_click_count', None),
+            getattr(r, 'form_focus_ms', None),
+            getattr(r, 'nudge_hover', None),
+            getattr(r, 'ease_of_use', None),
+            getattr(r, 'layout_clarity', None),
+            getattr(r, 'noticed_first', None),
+            getattr(r, 'real_use_likelihood', None),
+            getattr(r, 'feedback_text', None),
+            r.created_at.isoformat() if r.created_at else "",
+        ])
     return Response(out.getvalue(), mimetype="text/csv",
                     headers={"Content-Disposition": "attachment; filename=experiment_results.csv"})
 
@@ -1459,6 +1607,14 @@ def experiment_results():
             "first_interaction_ms": r.first_interaction_ms,
             "used_calendar": r.used_calendar,
             "typed_game": r.typed_game,
+            "calendar_block_count": getattr(r, 'calendar_block_count', None),
+            "calendar_section_ms": getattr(r, 'calendar_section_ms', None),
+            "game_section_ms": getattr(r, 'game_section_ms', None),
+            "time_to_calendar_ms": getattr(r, 'time_to_calendar_ms', None),
+            "time_to_game_ms": getattr(r, 'time_to_game_ms', None),
+            "rage_click_count": getattr(r, 'rage_click_count', None),
+            "form_focus_ms": getattr(r, 'form_focus_ms', None),
+            "nudge_hover": getattr(r, 'nudge_hover', None),
             "ease_of_use": getattr(r, 'ease_of_use', None),
             "layout_clarity": getattr(r, 'layout_clarity', None),
             "noticed_first": getattr(r, 'noticed_first', None),

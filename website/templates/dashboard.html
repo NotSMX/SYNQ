@@ -382,6 +382,14 @@
     });
   }
 
+  var modal = document.getElementById('exp-modal');
+    if (modal) {
+      modal.addEventListener('click', function(e) {
+        if (e.target.id === 'exp-modal') {
+          closeExpDetails();
+        }
+      });
+    }
   function renderJoinTimeBarChart(data) {
     var wrap = document.getElementById('exp-join-chart-wrap');
     var hint = document.getElementById('exp-join-chart-hint');
@@ -478,11 +486,59 @@
     });
   }
 
+  function fmtMs(ms) {
+    return ms == null ? '—' : (ms / 1000).toFixed(2) + 's';
+  }
+  function openExpDetails(id) {
+    const r = window.__EXP_DATA__?.find(x => String(x.id) === String(id));
+
+    if (!r) {
+      console.error("No record found for id:", id);
+      return;
+    }
+
+    const el = document.getElementById('exp-modal-body');
+
+    el.innerHTML = `
+      <div class="exp-detail-grid">
+
+        <div><b>Condition:</b></div><div>${r.condition ?? '—'}</div>
+        <div><b>Joined:</b></div><div>${r.joined ? 'Yes' : 'No'}</div>
+        <div><b>Time to join:</b></div><div>${r.time_to_join_ms != null ? (r.time_to_join_ms/1000).toFixed(2)+'s' : '—'}</div>
+        <div><b>First interaction:</b></div><div>${r.first_interaction_ms != null ? (r.first_interaction_ms/1000).toFixed(2)+'s' : '—'}</div>
+
+        <div><b>Clicks:</b></div><div>${r.click_count ?? '—'}</div>
+        <div><b>Scroll depth:</b></div><div>${r.scroll_depth != null ? Math.round(r.scroll_depth*100)+'%' : '—'}</div>
+
+        <div><b>Calendar used:</b></div><div>${r.used_calendar ? 'Yes' : 'No'}</div>
+        <div><b>Game typed:</b></div><div>${r.typed_game ? 'Yes' : 'No'}</div>
+
+        <div><b>Calendar dwell:</b></div><div>${fmtMs(r.calendar_section_ms)}</div>
+        <div><b>Time to calendar:</b></div><div>${fmtMs(r.time_to_calendar_ms)}</div>
+        <div><b>Game dwell:</b></div><div>${fmtMs(r.game_section_ms)}</div>
+        <div><b>Time to game:</b></div><div>${fmtMs(r.time_to_game_ms)}</div>
+        <div><b>Form focus:</b></div><div>${fmtMs(r.form_focus_ms)}</div>
+        <div><b>Rage clicks:</b></div><div>${r.rage_click_count ?? '—'}</div>
+
+        <div><b>Created:</b></div>
+        <div>${r.created_at ? new Date(r.created_at).toLocaleString() : '—'}</div>
+
+      </div>
+    `;
+    document.getElementById('exp-modal').classList.add('show');
+  }
+
+  function closeExpDetails() {
+    document.getElementById('exp-modal').classList.remove('show');
+  }
+
   function loadExpResults() {
     fetch('/experiment/results')
       .then(r => r.json())
       .then(function(data) {
+        window.__EXP_DATA__ = data;
 
+        
         // -------------------------
         // Split groups
         // -------------------------
@@ -570,11 +626,11 @@
               <th>#</th>
               <th>Cond</th>
               <th>Joined</th>
-              <th>Time</th>
+              <th>Time to join</th>
               <th>Clicks</th>
-              <th>Scroll</th>
-              <th>Calendar</th>
-              <th>Typed Game</th>
+              <th>Scroll %</th>
+              <th>Calendar used</th>
+              <th>Game typed</th>
               <th>Created</th>
             </tr>
           </thead>
@@ -582,8 +638,12 @@
         `;
 
         data.slice().reverse().forEach(function(r, i) {
+
+          var scrollPct = r.scroll_depth ? Math.round(r.scroll_depth * 100) : 0;
+          var time = r.time_to_join_ms ? (r.time_to_join_ms / 1000).toFixed(1) + 's' : '—';
+
           html += `
-            <tr>
+            <tr class="exp-row" onclick="openExpDetails(${JSON.stringify(r.id)})">
               <td>${data.length - i}</td>
               <td><b>${r.condition}</b></td>
               <td>
@@ -591,14 +651,12 @@
                   ${r.joined ? 'Yes' : 'No'}
                 </span>
               </td>
-              <td>${r.time_to_join_ms ? (r.time_to_join_ms/1000).toFixed(1)+'s' : '—'}</td>
+              <td>${time}</td>
               <td>${r.click_count ?? '—'}</td>
-              <td>${r.scroll_depth ? Math.round(r.scroll_depth*100)+'%' : '—'}</td>
+              <td>${scrollPct}%</td>
               <td>${r.used_calendar ? 'Yes' : 'No'}</td>
               <td>${r.typed_game ? 'Yes' : 'No'}</td>
-              <td style="font-size:0.8rem;color:#888;">
-                ${r.created_at ? new Date(r.created_at).toLocaleString() : '—'}
-              </td>
+              <td>${r.created_at ? new Date(r.created_at).toLocaleString() : '—'}</td>
             </tr>
           `;
         });
@@ -781,5 +839,15 @@
     <button class="btn btn-outline-primary btn-sm">Seed test data</button>
   </form>
 
+</div>
+<div id="exp-modal" class="exp-modal">
+  <div class="exp-modal-content">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h5 class="mb-0">Participant Details</h5>
+      <button class="btn btn-sm btn-outline-secondary" onclick="closeExpDetails()">Close</button>
+    </div>
+
+    <div id="exp-modal-body"></div>
+  </div>
 </div>
 {% endblock %}

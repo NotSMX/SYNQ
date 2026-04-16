@@ -158,6 +158,16 @@ class ExperimentResult(db.Model):
     used_calendar = db.Column(db.Boolean, default=False)
     typed_game = db.Column(db.Boolean, default=False)
 
+    # Extended behavioral metrics (collected by JS but previously not persisted)
+    calendar_block_count = db.Column(db.Integer, default=0)
+    calendar_section_ms = db.Column(db.Integer, default=0)
+    game_section_ms = db.Column(db.Integer, default=0)
+    time_to_calendar_ms = db.Column(db.Integer, nullable=True)
+    time_to_game_ms = db.Column(db.Integer, nullable=True)
+    rage_click_count = db.Column(db.Integer, default=0)
+    form_focus_ms = db.Column(db.Integer, default=0)
+    nudge_hover = db.Column(db.Boolean, default=False)
+
     # Post-experiment feedback fields
     ease_of_use = db.Column(db.Integer, nullable=True)
     layout_clarity = db.Column(db.Integer, nullable=True)
