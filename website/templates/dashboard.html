@@ -281,11 +281,19 @@
     </div>
   </div>
 
+  <div id="exp-completion-chart-wrap" class="panel mb-3 p-3" style="display: none; max-width: 640px; margin-left: auto; margin-right: auto;">
+    <p class="section-label mb-2 text-center">Join completion — Yes vs No (by condition)</p>
+    <p class="small text-center mb-2" style="color: rgba(255,255,255,0.45);"><strong style="color:#00ff88;">Yes</strong> = joined · <strong style="color:#f87171;">No</strong> = did not join</p>
+    <div style="position: relative; height: 260px;">
+      <canvas id="exp-completion-chart" aria-label="Joined yes versus no counts for A and B"></canvas>
+    </div>
+  </div>
+
   <p id="exp-join-chart-hint" class="small text-center mb-2 mt-4" style="color: rgba(255,255,255,0.45);">
-    Bar chart shows only after someone <strong>joins</strong> with a recorded time — compares avg seconds (A vs B).
+    Average time chart appears after someone <strong>joins</strong> with a recorded time — bars show mean seconds; whiskers = ±1 SEM (standard error of the mean).
   </p>
   <div id="exp-join-chart-wrap" class="panel mb-3 p-3" style="display: none; max-width: 640px; margin-left: auto; margin-right: auto;">
-    <p class="section-label mb-2 text-center">Time to join — Condition A vs B (averages)</p>
+    <p class="section-label mb-2 text-center">Time to join — Condition A vs B (averages ± SEM)</p>
     <div style="position: relative; height: 280px;">
       <canvas id="exp-join-time-chart" aria-label="Average time to join in seconds for A and B"></canvas>
     </div>
@@ -302,6 +310,154 @@
   <script>
   var expJoinTimeChart = null;
   var expAllJoinsChart = null;
+  var expCompletionChart = null;
+
+  function standardErrorOfMean(values) {
+    var n = values.length;
+    if (n < 2) return 0;
+    var mean = values.reduce(function(a, b) { return a + b; }, 0) / n;
+    var sumSq = values.reduce(function(s, v) { return s + (v - mean) * (v - mean); }, 0);
+    var sd = Math.sqrt(sumSq / (n - 1));
+    return sd / Math.sqrt(n);
+  }
+
+  if (typeof Chart !== 'undefined' && !window.__expJoinSemPluginRegistered) {
+    window.__expJoinSemPluginRegistered = true;
+    Chart.register({
+      id: 'expJoinSemErrorBars',
+      afterDatasetsDraw: function(chart) {
+        var cfg = chart.options.plugins && chart.options.plugins.expJoinSemErrorBars;
+        if (!cfg || !cfg.sems || !cfg.avgs) return;
+        var sems = cfg.sems;
+        var avgs = cfg.avgs;
+        var yScale = chart.scales.y;
+        if (!yScale) return;
+        var meta = chart.getDatasetMeta(0);
+        if (!meta || !meta.data || !meta.data.length) return;
+        var ctx = chart.ctx;
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.lineWidth = 1.25;
+        for (var i = 0; i < meta.data.length; i++) {
+          var bar = meta.data[i];
+          var avg = avgs[i];
+          var sem = sems[i];
+          if (avg == null || sem == null || sem <= 0) continue;
+          var x = bar.x;
+          var low = Math.max(0, avg - sem);
+          var high = avg + sem;
+          var yTop = yScale.getPixelForValue(high);
+          var yBot = yScale.getPixelForValue(low);
+          var half = Math.min((bar.width || 20) * 0.35, 10);
+          ctx.beginPath();
+          ctx.moveTo(x, yTop);
+          ctx.lineTo(x, yBot);
+          ctx.moveTo(x - half, yTop);
+          ctx.lineTo(x + half, yTop);
+          ctx.moveTo(x - half, yBot);
+          ctx.lineTo(x + half, yBot);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+    });
+  }
+
+  function renderCompletionChart(data) {
+    var wrap = document.getElementById('exp-completion-chart-wrap');
+    var canvas = document.getElementById('exp-completion-chart');
+    if (!wrap || !canvas || typeof Chart === 'undefined') return;
+
+    if (!data || data.length === 0) {
+      wrap.style.display = 'none';
+      if (expCompletionChart) {
+        expCompletionChart.destroy();
+        expCompletionChart = null;
+      }
+      return;
+    }
+
+    var aRows = data.filter(function(r) { return r.condition === 'A'; });
+    var bRows = data.filter(function(r) { return r.condition === 'B'; });
+    var aYes = aRows.filter(function(r) { return r.joined; }).length;
+    var aNo = aRows.length - aYes;
+    var bYes = bRows.filter(function(r) { return r.joined; }).length;
+    var bNo = bRows.length - bYes;
+
+    wrap.style.display = 'block';
+    if (expCompletionChart) {
+      expCompletionChart.destroy();
+    }
+
+    expCompletionChart = new Chart(canvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: [
+          'A — Calendar first (n=' + aRows.length + ')',
+          'B — Vote first (n=' + bRows.length + ')'
+        ],
+        datasets: [
+          {
+            label: 'Yes — joined',
+            data: [aYes, bYes],
+            backgroundColor: 'rgba(0, 255, 136, 0.72)',
+            borderColor: '#00ff88',
+            borderWidth: 1,
+            stack: 'completion'
+          },
+          {
+            label: 'No — did not join',
+            data: [aNo, bNo],
+            backgroundColor: 'rgba(248, 113, 113, 0.65)',
+            borderColor: '#f87171',
+            borderWidth: 1,
+            stack: 'completion'
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            labels: { color: '#ccc', boxWidth: 14 }
+          },
+          title: {
+            display: true,
+            text: 'All assigned participants in each condition',
+            color: 'rgba(255,255,255,0.8)',
+            font: { size: 12 }
+          },
+          tooltip: {
+            callbacks: {
+              footer: function(items) {
+                if (!items.length) return '';
+                var i = items[0].dataIndex;
+                var total = (i === 0 ? aRows.length : bRows.length);
+                if (!total) return '';
+                var joined = i === 0 ? aYes : bYes;
+                return Math.round(joined / total * 100) + '% joined';
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            stacked: true,
+            ticks: { color: '#aaa', maxRotation: 0 },
+            grid: { display: false }
+          },
+          y: {
+            stacked: true,
+            beginAtZero: true,
+            ticks: { color: '#888', stepSize: 1 },
+            title: { display: true, text: 'Participants', color: '#aaa' },
+            grid: { color: 'rgba(255,255,255,0.08)' }
+          }
+        }
+      }
+    });
+  }
 
   function renderAllJoinsBarChart(data) {
     var wrap = document.getElementById('exp-all-joins-chart-wrap');
@@ -406,6 +562,8 @@
     var bSecs = bJoined.map(function(r) { return r.time_to_join_ms / 1000; });
     var avgA = aSecs.length ? aSecs.reduce(function(x, y) { return x + y; }, 0) / aSecs.length : null;
     var avgB = bSecs.length ? bSecs.reduce(function(x, y) { return x + y; }, 0) / bSecs.length : null;
+    var semA = aSecs.length ? standardErrorOfMean(aSecs) : 0;
+    var semB = bSecs.length ? standardErrorOfMean(bSecs) : 0;
 
     if (!aSecs.length && !bSecs.length) {
       wrap.style.display = 'none';
@@ -453,9 +611,13 @@
         maintainAspectRatio: false,
         plugins: {
           legend: { labels: { color: '#ccc' } },
+          expJoinSemErrorBars: {
+            avgs: [avgA != null ? avgA : 0, avgB != null ? avgB : 0],
+            sems: [semA, semB]
+          },
           title: {
             display: true,
-            text: 'Joined participants only — lower is faster',
+            text: 'Joined participants only — lower is faster · whiskers = ±1 SEM',
             color: 'rgba(255,255,255,0.85)',
             font: { size: 13 }
           },
@@ -464,8 +626,15 @@
               afterLabel: function(ctx) {
                 var i = ctx.dataIndex;
                 var n = i === 0 ? aSecs.length : bSecs.length;
+                var sem = i === 0 ? semA : semB;
                 if (n === 0) return 'No joins with timing yet';
-                return 'Average of ' + n + ' join(s)';
+                var lines = ['Average of ' + n + ' join(s)'];
+                if (n >= 2 && sem > 0) {
+                  lines.push('SEM: ±' + sem.toFixed(2) + ' s');
+                } else if (n === 1) {
+                  lines.push('SEM: n/a (need n≥2)');
+                }
+                return lines.join('\n');
               }
             }
           }
@@ -578,6 +747,9 @@
         // -------------------------
         var avgTime = safeAvg(data.filter(r => r.joined), 'time_to_join_ms');
         document.getElementById('exp-avg-time').textContent =
+          avgTime != null ? (avgTime / 1000).toFixed(1) + 's' : '—';
+
+        renderCompletionChart(data);
           avgTime ? (avgTime / 1000).toFixed(1) + 's' : '—';
 
         // -------------------------
@@ -666,7 +838,17 @@
       })
       .catch(function() {
         document.getElementById('exp-results-table').innerHTML =
-          '<p style="color:#f87171">Failed to load results</p>';
+          '<p style="color:#f87171;font-size:0.85rem;">Failed to load results.</p>';
+        var w = document.getElementById('exp-join-chart-wrap');
+        if (w) w.style.display = 'none';
+        var w2 = document.getElementById('exp-all-joins-chart-wrap');
+        if (w2) w2.style.display = 'none';
+        var w3 = document.getElementById('exp-completion-chart-wrap');
+        if (w3) w3.style.display = 'none';
+        if (expCompletionChart) {
+          expCompletionChart.destroy();
+          expCompletionChart = null;
+        }
       });
   }
 
