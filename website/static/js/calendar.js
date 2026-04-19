@@ -126,8 +126,11 @@ document.addEventListener('DOMContentLoaded', function() {
         eventDurationEditable: true,
         selectMirror: false,
         selectOverlap: true,
-        longPressDelay: 300,
-        selectLongPressDelay: 300, 
+        longPressDelay: 1000,
+        scrollTime: '08:00:00',
+        handleWindowResize: true,
+        stickyHeaderDates: true,
+        selectLongPressDelay: 1000, 
         timeZone: 'local', 
 
         select: function(info) {
@@ -274,8 +277,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 pressTimer = setTimeout(function() {
                     if (!confirm("Remove this availability?")) return;
                     handleEventRemoval(info.event);
-                }, 600);
-            }, { passive: true });
+                }, 1500);
+            });
 
             info.el.addEventListener('touchend', function() {
                 clearTimeout(pressTimer);

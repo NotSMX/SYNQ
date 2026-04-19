@@ -492,16 +492,14 @@ function goToInstructions() {
 }
 
 function acceptConsent() {
+    const scrollY = window.scrollY;           // save before fixing
     const modal = document.getElementById('consent-modal');
     modal.classList.add('fade-out');
     document.body.classList.remove('no-consent');
-    const scrollY = window.scrollY;
-    setTimeout(() => {
-        window.scrollTo(0, scrollY);
-        modal.style.display = 'none';
-    }, 350);
+    window.scrollTo(0, scrollY);              // restore immediately
+    setTimeout(() => { modal.style.display = 'none'; }, 350);
     window.consentGiven = true;
-    _expStartMs = Date.now();   // ← timer starts HERE, only after agreement
+    _expStartMs = Date.now();
     _refreshSectionVisibility();
 }
 
