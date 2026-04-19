@@ -123,7 +123,7 @@ document.addEventListener('DOMContentLoaded', function() {
         selectOverlap: true,
         longPressDelay: 300,
         selectLongPressDelay: 300, 
-        timeZone: 'UTC', 
+        timeZone: 'local', 
 
         select: function(info) {
             if (!sessionHash && !window.isExperiment) return;
@@ -224,6 +224,22 @@ document.addEventListener('DOMContentLoaded', function() {
                     });
                 }
             });
+        },
+
+        selectAllow: function(selectInfo) {
+            const now = new Date();
+            return selectInfo.start >= now;
+        },
+
+        eventAllow: function(dropInfo, draggedEvent) {
+            const now = new Date();
+            return dropInfo.start >= now;
+        },
+
+        validRange: function(nowDate) {
+            return {
+                start: nowDate
+            };
         },
 
         eventClick: function(info) {
