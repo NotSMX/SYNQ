@@ -220,9 +220,11 @@
 
   <div id="tab-panel-analysis" style="display:none;">
 
-  <!-- Experiment Panel -->
-  <hr class="section-divider">
-  <p class="section-label">Experiment — Join Flow A/B Test</p>
+  <!-- ══════════════════════════════════════════════════════
+       SECTION 1 — OVERVIEW
+       Stat cards + generate link + controls + results table
+  ══════════════════════════════════════════════════════ -->
+  <p class="section-label">Overview</p>
 
   <div class="row g-3 mb-3">
     <div class="col-md-4">
@@ -248,6 +250,19 @@
     </div>
   </div>
 
+  <!-- Join completion chart -->
+  <div class="row g-3 mb-3">
+    <div class="col-lg-6 mx-auto">
+      <div id="exp-completion-chart-wrap" class="panel p-3" style="display:none;">
+        <p class="section-label mb-2 text-center">Join completion — Yes vs No (by condition)</p>
+        <p class="small text-center mb-2" style="color:rgba(255,255,255,0.45);"><strong style="color:#00ff88;">Yes</strong> = joined · <strong style="color:#f87171;">No</strong> = did not join</p>
+        <div style="position:relative; height:240px;">
+          <canvas id="exp-completion-chart" aria-label="Joined yes versus no counts for A and B"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Generate experiment links -->
   <div class="panel mb-3 p-3 text-center">
     <p class="section-label mb-3">Generate Experiment Link</p>
@@ -267,14 +282,10 @@
     </div>
   </div>
 
-  <!-- Controls (above Results) -->
+  <!-- Controls -->
   <div class="d-flex gap-2 flex-wrap justify-content-center mb-3">
-    <a href="{{ url_for('main.experiment_export', format='csv') }}" class="btn btn-outline-primary btn-sm">
-      ↓ Export CSV
-    </a>
-    <a href="{{ url_for('main.experiment_export', format='json') }}" class="btn btn-outline-primary btn-sm">
-      ↓ Export JSON
-    </a>
+    <a href="{{ url_for('main.experiment_export', format='csv') }}" class="btn btn-outline-primary btn-sm">↓ Export CSV</a>
+    <a href="{{ url_for('main.experiment_export', format='json') }}" class="btn btn-outline-primary btn-sm">↓ Export JSON</a>
     <form action="{{ url_for('main.experiment_reset_participants') }}" method="POST"
           onsubmit="return confirm('Clear all participants from the experiment? Result rows will be kept.');">
       <button type="submit" class="btn btn-outline-warning btn-sm">Clear Participants</button>
@@ -289,29 +300,78 @@
   <div class="panel mb-3 p-3">
     <p class="section-label mb-2">Results</p>
     <div id="exp-results-table">
-      <p style="color: rgba(255,255,255,0.3); font-size:0.85rem;">Loading…</p>
+      <p style="color:rgba(255,255,255,0.3); font-size:0.85rem;">Loading…</p>
     </div>
   </div>
 
+  <!-- ══════════════════════════════════════════════════════
+       SECTION 2 — TIME TO JOIN
+       SEM bar · strip plot · individual bar
+  ══════════════════════════════════════════════════════ -->
+  <hr class="section-divider">
+  <p class="section-label">Time to join — A vs B</p>
+
+  <!-- Row: SEM bar + strip plot -->
   <div class="row g-3 mb-3 align-items-stretch">
     <div class="col-lg-6">
-      <div id="exp-completion-chart-wrap" class="panel h-100 p-3" style="display: none;">
-        <p class="section-label mb-2 text-center">Join completion — Yes vs No (by condition)</p>
-        <p class="small text-center mb-2" style="color: rgba(255,255,255,0.45);"><strong style="color:#00ff88;">Yes</strong> = joined · <strong style="color:#f87171;">No</strong> = did not join</p>
-        <div style="position: relative; height: 260px;">
-          <canvas id="exp-completion-chart" aria-label="Joined yes versus no counts for A and B"></canvas>
+      <p id="exp-join-chart-hint" class="small text-center mb-2 mt-1" style="color:rgba(255,255,255,0.45);">
+        Average time chart appears after someone <strong>joins</strong> with a recorded time — bars show mean seconds; whiskers = ±1 SEM.
+      </p>
+      <div id="exp-join-chart-wrap" class="panel h-100 p-3" style="display:none;">
+        <p class="section-label mb-2 text-center">Average time to join ± SEM</p>
+        <p class="small text-center mb-2" style="color:rgba(255,255,255,0.4);">Lower is faster · whiskers show variability</p>
+        <div style="position:relative; height:240px;">
+          <canvas id="exp-join-time-chart" aria-label="Average time to join in seconds for A and B"></canvas>
         </div>
       </div>
     </div>
-
     <div class="col-lg-6">
-      <p id="exp-join-chart-hint" class="small text-center mb-2 mt-1" style="color: rgba(255,255,255,0.45);">
-        Average time chart appears after someone <strong>joins</strong> with a recorded time - bars show mean seconds; whiskers = +/-1 SEM (standard error of the mean).
-      </p>
-      <div id="exp-join-chart-wrap" class="panel h-100 p-3" style="display: none;">
-        <p class="section-label mb-2 text-center">Time to join — Condition A vs B (averages ± SEM)</p>
-        <div style="position: relative; height: 280px;">
-          <canvas id="exp-join-time-chart" aria-label="Average time to join in seconds for A and B"></canvas>
+      <div id="exp-strip-chart-wrap" class="panel h-100 p-3" style="display:none;">
+        <p class="section-label mb-2 text-center">Every data point — individual join times</p>
+        <p class="small text-center mb-2" style="color:rgba(255,255,255,0.4);">Each dot = one participant · reveals outliers & spread</p>
+        <div style="position:relative; height:240px;">
+          <canvas id="exp-strip-chart" aria-label="Strip plot of time to join by condition"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Row: full-width individual bar -->
+  <div class="row g-3 mb-3">
+    <div class="col-12">
+      <div id="exp-all-joins-chart-wrap" class="panel p-3" style="display:none;">
+        <p class="section-label mb-2 text-center">All participants — time to join ranked</p>
+        <p class="small text-center mb-2" style="color:rgba(255,255,255,0.4);">Sorted by ID · lower is faster</p>
+        <div style="position:relative; height:280px;" id="exp-all-joins-chart-container">
+          <canvas id="exp-all-joins-chart" aria-label="Bar for each participant join time"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       SECTION 3 — ENGAGEMENT TIMING
+       First interaction · time-to-section · dwell times
+  ══════════════════════════════════════════════════════ -->
+  <hr class="section-divider">
+  <p class="section-label">Engagement timing — when did they engage?</p>
+
+  <div class="row g-3 mb-3 align-items-stretch">
+    <div class="col-lg-6">
+      <div id="exp-first-interaction-chart-wrap" class="panel h-100 p-3" style="display:none;">
+        <p class="section-label mb-1 text-center">Time to first interaction — A vs B</p>
+        <p class="small text-center mb-2" style="color:rgba(255,255,255,0.4);">How long before participants clicked or interacted at all · lower = less hesitation</p>
+        <div style="position:relative; height:240px;">
+          <canvas id="exp-first-interaction-chart" aria-label="Time to first interaction by condition"></canvas>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div id="exp-time-to-section-chart-wrap" class="panel h-100 p-3" style="display:none;">
+        <p class="section-label mb-1 text-center">Time to reach each section — A vs B</p>
+        <p class="small text-center mb-2" style="color:rgba(255,255,255,0.4);">Avg seconds before engaging with calendar · and with game input</p>
+        <div style="position:relative; height:240px;">
+          <canvas id="exp-time-to-section-chart" aria-label="Time to calendar and game section by condition"></canvas>
         </div>
       </div>
     </div>
@@ -319,10 +379,91 @@
 
   <div class="row g-3 mb-3">
     <div class="col-12">
-      <div id="exp-all-joins-chart-wrap" class="panel p-3" style="display: none;">
-        <p class="section-label mb-2 text-center">All participants — time to join (each join)</p>
-        <div style="position: relative; height: 280px;" id="exp-all-joins-chart-container">
-          <canvas id="exp-all-joins-chart" aria-label="Bar for each participant join time"></canvas>
+      <div id="exp-dwell-chart-wrap" class="panel p-3" style="display:none;">
+        <p class="section-label mb-1 text-center">Section dwell time — where did they spend their time?</p>
+        <p class="small text-center mb-2" style="color:rgba(255,255,255,0.4);">Avg seconds in calendar section · game section · form focus · per condition</p>
+        <div style="position:relative; height:240px;">
+          <canvas id="exp-dwell-chart" aria-label="Section dwell time by condition"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       SECTION 4 — BEHAVIOR
+       Funnel · clicks vs time · frustration signals
+  ══════════════════════════════════════════════════════ -->
+  <hr class="section-divider">
+  <p class="section-label">Behavior — what did they do?</p>
+
+  <div class="row g-3 mb-3 align-items-stretch">
+    <div class="col-lg-6">
+      <div id="exp-funnel-chart-wrap" class="panel h-100 p-3" style="display:none;">
+        <p class="section-label mb-1 text-center">Engagement funnel — % who completed each action</p>
+        <p class="small text-center mb-2" style="color:rgba(255,255,255,0.4);">Cyan = A · Magenta = B</p>
+        <div style="position:relative; height:240px;">
+          <canvas id="exp-funnel-chart" aria-label="Behavioral funnel by condition"></canvas>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div id="exp-frustration-chart-wrap" class="panel h-100 p-3" style="display:none;">
+        <p class="section-label mb-1 text-center">Frustration signals — avg per participant</p>
+        <p class="small text-center mb-2" style="color:rgba(255,255,255,0.4);">Rage clicks · total clicks · form focus time</p>
+        <div style="position:relative; height:240px;">
+          <canvas id="exp-frustration-chart" aria-label="Frustration signals by condition"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-3">
+    <div class="col-12">
+      <div id="exp-clicks-time-chart-wrap" class="panel p-3" style="display:none;">
+        <p class="section-label mb-1 text-center">Click count vs. time to join — does clicking more mean taking longer?</p>
+        <p class="small text-center mb-2" style="color:rgba(255,255,255,0.4);"><span style="color:#00ffff;">■</span> Condition A &nbsp; <span style="color:#ff00aa;">■</span> Condition B · hover for participant ID</p>
+        <div style="position:relative; height:260px;">
+          <canvas id="exp-clicks-time-chart" aria-label="Click count vs time to join scatter"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       SECTION 5 — QUALITATIVE
+       Noticed first · ratings · scroll vs join
+  ══════════════════════════════════════════════════════ -->
+  <hr class="section-divider">
+  <p class="section-label">Qualitative — what did they think?</p>
+
+  <div class="row g-3 mb-3 align-items-stretch">
+    <div class="col-lg-6">
+      <div id="exp-noticed-chart-wrap" class="panel h-100 p-3" style="display:none;">
+        <p class="section-label mb-1 text-center">What participants noticed first</p>
+        <p class="small text-center mb-2" style="color:rgba(255,255,255,0.4);">From post-experiment feedback · respondents only</p>
+        <div style="position:relative; height:240px;">
+          <canvas id="exp-noticed-chart" aria-label="Noticed first by condition"></canvas>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div id="exp-ratings-chart-wrap" class="panel h-100 p-3" style="display:none;">
+        <p class="section-label mb-1 text-center">Post-experiment ratings — avg score (1–5)</p>
+        <p class="small text-center mb-2" style="color:rgba(255,255,255,0.4);">Ease of use · layout clarity · real use likelihood · by condition</p>
+        <div style="position:relative; height:240px;">
+          <canvas id="exp-ratings-chart" aria-label="Feedback ratings by condition"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-3">
+    <div class="col-lg-8 mx-auto">
+      <div id="exp-scroll-chart-wrap" class="panel p-3" style="display:none;">
+        <p class="section-label mb-1 text-center">Scroll depth distribution — A vs B</p>
+        <p class="small text-center mb-2" style="color:rgba(255,255,255,0.4);">How far participants scrolled — with 100% join rate this is mostly informational</p>
+        <div style="position:relative; height:220px;">
+          <canvas id="exp-scroll-chart" aria-label="Scroll depth histogram by condition"></canvas>
         </div>
       </div>
     </div>
@@ -772,37 +913,24 @@
           avgTime != null ? (avgTime / 1000).toFixed(1) + 's' : '—';
 
         renderCompletionChart(data);
-          avgTime ? (avgTime / 1000).toFixed(1) + 's' : '—';
 
-        // -------------------------
-        // NEW KPI EXTENSIONS
-        // -------------------------
-        var avgClicks = safeAvg(data, 'click_count');
-        var avgScroll = safeAvg(data, 'scroll_depth');
-        var firstInteractionAvg = safeAvg(data, 'first_interaction_time');
-
-        // optionally create new DOM fields if you want:
-        console.log("Avg clicks:", avgClicks);
-        console.log("Avg scroll:", avgScroll);
-        console.log("First interaction:", firstInteractionAvg);
-
-        // -------------------------
-        // BEHAVIOR COMPARISON (NEW)
-        // -------------------------
-        var calendarUsageA = pct(a, 'used_calendar');
-        var calendarUsageB = pct(b, 'used_calendar');
-
-        var typedGameA = pct(a, 'typed_game');
-        var typedGameB = pct(b, 'typed_game');
-
-        console.log("Calendar usage A/B:", calendarUsageA, calendarUsageB);
-        console.log("Typed game A/B:", typedGameA, typedGameB);
-
-        // -------------------------
-        // CHARTS (unchanged calls)
-        // -------------------------
+        // ── All charts ──────────────────────────────────────
+        // Section 2: Time to join
         renderJoinTimeBarChart(data);
         renderAllJoinsBarChart(data);
+        renderStripChart(data);
+        // Section 3: Engagement timing
+        renderFirstInteractionChart(data);
+        renderTimeToSectionChart(data);
+        renderDwellChart(data);
+        // Section 4: Behavior
+        renderFunnelChart(data);
+        renderFrustrationChart(data);
+        renderClicksTimeChart(data);
+        // Section 5: Qualitative
+        renderNoticedFirstChart(data);
+        renderRatingsChart(data);
+        renderScrollDepthChart(data);
 
         // -------------------------
         // TABLE (expanded)
@@ -905,6 +1033,475 @@
     navigator.clipboard.writeText(input.value);
     btn.textContent = 'Copied!';
     setTimeout(() => btn.textContent = 'Copy', 1500);
+  }
+
+  // ─── HELPER: show/hide a chart wrap ─────────────────────────────────────
+  function showWrap(id, chartRef, destroyIfEmpty) {
+    var wrap = document.getElementById(id);
+    if (wrap) wrap.style.display = destroyIfEmpty ? 'none' : 'block';
+    if (destroyIfEmpty && chartRef) { chartRef.destroy(); return null; }
+    return chartRef;
+  }
+
+  // ─── CHART: Behavioral funnel ────────────────────────────────────────────
+  var expFunnelChart = null;
+  function renderFunnelChart(data) {
+    var wrap = document.getElementById('exp-funnel-chart-wrap');
+    var canvas = document.getElementById('exp-funnel-chart');
+    if (!wrap || !canvas || typeof Chart === 'undefined' || !data.length) {
+      if (wrap) wrap.style.display = 'none'; return;
+    }
+    var a = data.filter(r => r.condition === 'A');
+    var b = data.filter(r => r.condition === 'B');
+    function pct(arr, key) {
+      if (!arr.length) return 0;
+      return Math.round(arr.filter(x => x[key]).length / arr.length * 100);
+    }
+    var labels = ['Used Calendar', 'Typed Game', 'Nudge Hover', 'Joined'];
+    var aVals = [pct(a,'used_calendar'), pct(a,'typed_game'), pct(a,'nudge_hover'), a.length ? Math.round(a.filter(r=>r.joined).length/a.length*100) : 0];
+    var bVals = [pct(b,'used_calendar'), pct(b,'typed_game'), pct(b,'nudge_hover'), b.length ? Math.round(b.filter(r=>r.joined).length/b.length*100) : 0];
+    wrap.style.display = 'block';
+    if (expFunnelChart) expFunnelChart.destroy();
+    expFunnelChart = new Chart(canvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [
+          { label: 'A — Calendar first (n='+a.length+')', data: aVals, backgroundColor: 'rgba(0,255,255,0.5)', borderColor: '#00ffff', borderWidth: 1 },
+          { label: 'B — Vote first (n='+b.length+')', data: bVals, backgroundColor: 'rgba(255,0,170,0.5)', borderColor: '#ff00aa', borderWidth: 1 }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#ccc', boxWidth: 12 } } },
+        scales: {
+          x: { ticks: { color: '#aaa' }, grid: { display: false } },
+          y: { beginAtZero: true, max: 100, ticks: { color: '#888', callback: v => v + '%' },
+               title: { display: true, text: '% of participants', color: '#aaa' },
+               grid: { color: 'rgba(255,255,255,0.07)' } }
+        }
+      }
+    });
+  }
+
+  // ─── CHART: Scroll depth distribution (bucketed) ────────────────────────
+  var expScrollChart = null;
+  function renderScrollDepthChart(data) {
+    var wrap = document.getElementById('exp-scroll-chart-wrap');
+    var canvas = document.getElementById('exp-scroll-chart');
+    if (!wrap || !canvas || typeof Chart === 'undefined' || !data.length) {
+      if (wrap) wrap.style.display = 'none'; return;
+    }
+    var buckets = ['0–20%', '21–40%', '41–60%', '61–80%', '81–100%'];
+    function bucket(v) {
+      if (v == null) return 0;
+      return Math.min(4, Math.floor(v * 5));
+    }
+    var aCounts = [0,0,0,0,0], bCounts = [0,0,0,0,0];
+    data.forEach(r => {
+      var b = bucket(r.scroll_depth);
+      if (r.condition === 'A') aCounts[b]++;
+      else bCounts[b]++;
+    });
+    wrap.style.display = 'block';
+    if (expScrollChart) expScrollChart.destroy();
+    expScrollChart = new Chart(canvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: buckets,
+        datasets: [
+          { label: 'A — Calendar first', data: aCounts, backgroundColor: 'rgba(0,255,255,0.5)', borderColor: '#00ffff', borderWidth: 1 },
+          { label: 'B — Vote first', data: bCounts, backgroundColor: 'rgba(255,0,170,0.5)', borderColor: '#ff00aa', borderWidth: 1 }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#ccc', boxWidth: 12 } } },
+        scales: {
+          x: { ticks: { color: '#aaa' }, grid: { display: false },
+               title: { display: true, text: 'Scroll depth bucket', color: '#aaa' } },
+          y: { beginAtZero: true, ticks: { color: '#888', stepSize: 1 },
+               title: { display: true, text: 'Participants', color: '#aaa' },
+               grid: { color: 'rgba(255,255,255,0.07)' } }
+        }
+      }
+    });
+  }
+
+  // ─── CHART: Section dwell time ───────────────────────────────────────────
+  var expDwellChart = null;
+  function renderDwellChart(data) {
+    var wrap = document.getElementById('exp-dwell-chart-wrap');
+    var canvas = document.getElementById('exp-dwell-chart');
+    if (!wrap || !canvas || typeof Chart === 'undefined' || !data.length) {
+      if (wrap) wrap.style.display = 'none'; return;
+    }
+    var a = data.filter(r => r.condition === 'A');
+    var b = data.filter(r => r.condition === 'B');
+    function avgMs(arr, key) {
+      var vals = arr.map(x => x[key]).filter(v => v != null && v > 0);
+      return vals.length ? (vals.reduce((s,v) => s+v, 0) / vals.length / 1000) : 0;
+    }
+    var labels = ['Calendar section', 'Game section', 'Form focus'];
+    var aVals = [avgMs(a,'calendar_section_ms'), avgMs(a,'game_section_ms'), avgMs(a,'form_focus_ms')];
+    var bVals = [avgMs(b,'calendar_section_ms'), avgMs(b,'game_section_ms'), avgMs(b,'form_focus_ms')];
+    var anyData = [...aVals, ...bVals].some(v => v > 0);
+    if (!anyData) { wrap.style.display = 'none'; return; }
+    wrap.style.display = 'block';
+    if (expDwellChart) expDwellChart.destroy();
+    expDwellChart = new Chart(canvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [
+          { label: 'A — Calendar first (n='+a.length+')', data: aVals, backgroundColor: 'rgba(0,255,255,0.5)', borderColor: '#00ffff', borderWidth: 1 },
+          { label: 'B — Vote first (n='+b.length+')', data: bVals, backgroundColor: 'rgba(255,0,170,0.5)', borderColor: '#ff00aa', borderWidth: 1 }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#ccc', boxWidth: 12 } } },
+        scales: {
+          x: { ticks: { color: '#aaa' }, grid: { display: false } },
+          y: { beginAtZero: true, ticks: { color: '#888', callback: v => v.toFixed(1)+'s' },
+               title: { display: true, text: 'Avg seconds', color: '#aaa' },
+               grid: { color: 'rgba(255,255,255,0.07)' } }
+        }
+      }
+    });
+  }
+
+  // ─── CHART: Frustration signals ──────────────────────────────────────────
+  var expFrustrationChart = null;
+  function renderFrustrationChart(data) {
+    var wrap = document.getElementById('exp-frustration-chart-wrap');
+    var canvas = document.getElementById('exp-frustration-chart');
+    if (!wrap || !canvas || typeof Chart === 'undefined' || !data.length) {
+      if (wrap) wrap.style.display = 'none'; return;
+    }
+    var a = data.filter(r => r.condition === 'A');
+    var b = data.filter(r => r.condition === 'B');
+    function avg(arr, key) {
+      var vals = arr.map(x => x[key]).filter(v => v != null);
+      return vals.length ? vals.reduce((s,v)=>s+v,0)/vals.length : 0;
+    }
+    var labels = ['Rage clicks', 'Total clicks', 'Form focus (s)'];
+    var aVals = [avg(a,'rage_click_count'), avg(a,'click_count'), avg(a,'form_focus_ms')/1000];
+    var bVals = [avg(b,'rage_click_count'), avg(b,'click_count'), avg(b,'form_focus_ms')/1000];
+    wrap.style.display = 'block';
+    if (expFrustrationChart) expFrustrationChart.destroy();
+    expFrustrationChart = new Chart(canvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [
+          { label: 'A — Calendar first', data: aVals, backgroundColor: 'rgba(0,255,255,0.5)', borderColor: '#00ffff', borderWidth: 1 },
+          { label: 'B — Vote first', data: bVals, backgroundColor: 'rgba(255,0,170,0.5)', borderColor: '#ff00aa', borderWidth: 1 }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#ccc', boxWidth: 12 } },
+          tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + ctx.raw.toFixed(2) } } },
+        scales: {
+          x: { ticks: { color: '#aaa' }, grid: { display: false } },
+          y: { beginAtZero: true, ticks: { color: '#888' },
+               title: { display: true, text: 'Avg per participant', color: '#aaa' },
+               grid: { color: 'rgba(255,255,255,0.07)' } }
+        }
+      }
+    });
+  }
+
+  // ─── CHART: Post-experiment feedback ratings ─────────────────────────────
+  var expRatingsChart = null;
+  function renderRatingsChart(data) {
+    var wrap = document.getElementById('exp-ratings-chart-wrap');
+    var canvas = document.getElementById('exp-ratings-chart');
+    if (!wrap || !canvas || typeof Chart === 'undefined' || !data.length) {
+      if (wrap) wrap.style.display = 'none'; return;
+    }
+    var a = data.filter(r => r.condition === 'A');
+    var b = data.filter(r => r.condition === 'B');
+    function avgRating(arr, key) {
+      var vals = arr.map(x => x[key]).filter(v => v != null && v > 0);
+      return vals.length ? parseFloat((vals.reduce((s,v)=>s+v,0)/vals.length).toFixed(2)) : null;
+    }
+    var labels = ['Ease of use', 'Layout clarity', 'Real use likelihood'];
+    var aVals = [avgRating(a,'ease_of_use'), avgRating(a,'layout_clarity'), avgRating(a,'real_use_likelihood')];
+    var bVals = [avgRating(b,'ease_of_use'), avgRating(b,'layout_clarity'), avgRating(b,'real_use_likelihood')];
+    var hasData = [...aVals,...bVals].some(v => v != null);
+    if (!hasData) { wrap.style.display = 'none'; return; }
+    wrap.style.display = 'block';
+    if (expRatingsChart) expRatingsChart.destroy();
+    expRatingsChart = new Chart(canvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [
+          { label: 'A — Calendar first', data: aVals, backgroundColor: 'rgba(0,255,255,0.5)', borderColor: '#00ffff', borderWidth: 1 },
+          { label: 'B — Vote first', data: bVals, backgroundColor: 'rgba(255,0,170,0.5)', borderColor: '#ff00aa', borderWidth: 1 }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#ccc', boxWidth: 12 } } },
+        scales: {
+          x: { ticks: { color: '#aaa' }, grid: { display: false } },
+          y: { beginAtZero: true, min: 0, max: 5,
+               ticks: { color: '#888', stepSize: 1 },
+               title: { display: true, text: 'Avg score (1–5)', color: '#aaa' },
+               grid: { color: 'rgba(255,255,255,0.07)' } }
+        }
+      }
+    });
+  }
+
+  // ─── CHART: Scroll depth vs join outcome (scatter) ───────────────────────
+  var expScrollJoinChart = null;
+  function renderScrollJoinChart(data) {
+    var wrap = document.getElementById('exp-scroll-join-chart-wrap');
+    var canvas = document.getElementById('exp-scroll-join-chart');
+    if (!wrap || !canvas || typeof Chart === 'undefined' || !data.length) {
+      if (wrap) wrap.style.display = 'none'; return;
+    }
+    // 4 datasets: A+joined, A+not, B+joined, B+not
+    var datasets = [
+      { label: 'A · Joined',   condition: 'A', joined: true,  color: 'rgba(0,255,255,0.75)',   border: '#00ffff' },
+      { label: 'A · Not joined', condition: 'A', joined: false, color: 'rgba(0,200,200,0.3)',   border: '#00cccc' },
+      { label: 'B · Joined',   condition: 'B', joined: true,  color: 'rgba(255,0,170,0.75)',   border: '#ff00aa' },
+      { label: 'B · Not joined', condition: 'B', joined: false, color: 'rgba(180,0,120,0.3)',   border: '#cc0088' },
+    ].map(d => ({
+      label: d.label,
+      data: data
+        .filter(r => r.condition === d.condition && !!r.joined === d.joined && r.scroll_depth != null)
+        .map((r, i) => ({ x: Math.round(r.scroll_depth * 100), y: r.time_to_join_ms != null ? r.time_to_join_ms/1000 : 0, id: r.id })),
+      backgroundColor: d.color,
+      borderColor: d.border,
+      borderWidth: 1,
+      pointRadius: 5,
+      pointHoverRadius: 7
+    }));
+    var hasPoints = datasets.some(d => d.data.length > 0);
+    if (!hasPoints) { wrap.style.display = 'none'; return; }
+    wrap.style.display = 'block';
+    if (expScrollJoinChart) expScrollJoinChart.destroy();
+    expScrollJoinChart = new Chart(canvas.getContext('2d'), {
+      type: 'scatter',
+      data: { datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#ccc', boxWidth: 12 } },
+          tooltip: {
+            callbacks: {
+              label: ctx => {
+                var p = ctx.raw;
+                return (ctx.dataset.label || '') + ' — scroll: ' + p.x + '% · time: ' + (p.y ? p.y.toFixed(1)+'s' : 'n/a');
+              }
+            }
+          }
+        },
+        scales: {
+          x: { title: { display: true, text: 'Scroll depth (%)', color: '#aaa' },
+               ticks: { color: '#888', callback: v => v + '%' }, min: 0, max: 100,
+               grid: { color: 'rgba(255,255,255,0.07)' } },
+          y: { title: { display: true, text: 'Time to join (s)', color: '#aaa' },
+               beginAtZero: true, ticks: { color: '#888', callback: v => v + 's' },
+               grid: { color: 'rgba(255,255,255,0.07)' } }
+        }
+      }
+    });
+  }
+
+  // ─── CHART: Strip plot ───────────────────────────────────────────────────
+  var expStripChart = null;
+  function renderStripChart(data) {
+    var wrap = document.getElementById('exp-strip-chart-wrap');
+    var canvas = document.getElementById('exp-strip-chart');
+    if (!wrap || !canvas || typeof Chart === 'undefined') { if (wrap) wrap.style.display = 'none'; return; }
+    var rows = data.filter(r => r.time_to_join_ms != null);
+    if (!rows.length) { wrap.style.display = 'none'; return; }
+    function jitter() { return (Math.random() - 0.5) * 0.3; }
+    var aData = rows.filter(r => r.condition === 'A').map(r => ({ x: r.time_to_join_ms / 1000, y: 1 + jitter(), id: r.id }));
+    var bData = rows.filter(r => r.condition === 'B').map(r => ({ x: r.time_to_join_ms / 1000, y: 2 + jitter(), id: r.id }));
+    wrap.style.display = 'block';
+    if (expStripChart) expStripChart.destroy();
+    expStripChart = new Chart(canvas.getContext('2d'), {
+      type: 'scatter',
+      data: {
+        datasets: [
+          { label: 'A — Calendar first', data: aData, backgroundColor: 'rgba(0,255,255,0.75)', borderColor: '#00ffff', borderWidth: 1, pointRadius: 7, pointHoverRadius: 9 },
+          { label: 'B — Vote first', data: bData, backgroundColor: 'rgba(255,0,170,0.75)', borderColor: '#ff00aa', borderWidth: 1, pointRadius: 7, pointHoverRadius: 9 }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#ccc', boxWidth: 12 } },
+          tooltip: { callbacks: { label: ctx => '#' + ctx.raw.id + ' — ' + ctx.raw.x.toFixed(1) + 's' } }
+        },
+        scales: {
+          x: { beginAtZero: true, title: { display: true, text: 'Seconds to join', color: '#aaa' }, ticks: { color: '#888', callback: v => v + 's' }, grid: { color: 'rgba(255,255,255,0.07)' } },
+          y: { min: 0.3, max: 2.7, ticks: { color: '#aaa', callback: v => v === 1 ? 'A' : v === 2 ? 'B' : '', stepSize: 1 }, grid: { color: 'rgba(255,255,255,0.07)' } }
+        }
+      }
+    });
+  }
+
+  // ─── CHART: Time to first interaction ────────────────────────────────────
+  var expFirstInteractionChart = null;
+  function renderFirstInteractionChart(data) {
+    var wrap = document.getElementById('exp-first-interaction-chart-wrap');
+    var canvas = document.getElementById('exp-first-interaction-chart');
+    if (!wrap || !canvas || typeof Chart === 'undefined') { if (wrap) wrap.style.display = 'none'; return; }
+    var a = data.filter(r => r.condition === 'A');
+    var b = data.filter(r => r.condition === 'B');
+    function avgMs(arr, key) {
+      var vals = arr.map(x => x[key]).filter(v => v != null && v > 0);
+      return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length / 1000 : null;
+    }
+    function semSec(arr, key) {
+      var vals = arr.map(x => x[key]).filter(v => v != null && v > 0).map(v => v / 1000);
+      if (vals.length < 2) return 0;
+      var mean = vals.reduce((s, v) => s + v, 0) / vals.length;
+      var sd = Math.sqrt(vals.reduce((s, v) => s + (v - mean) ** 2, 0) / (vals.length - 1));
+      return sd / Math.sqrt(vals.length);
+    }
+    var avgA = avgMs(a, 'first_interaction_ms');
+    var avgB = avgMs(b, 'first_interaction_ms');
+    if (avgA == null && avgB == null) { wrap.style.display = 'none'; return; }
+    var semA = semSec(a, 'first_interaction_ms');
+    var semB = semSec(b, 'first_interaction_ms');
+    wrap.style.display = 'block';
+    if (expFirstInteractionChart) expFirstInteractionChart.destroy();
+    expFirstInteractionChart = new Chart(canvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: ['A — Calendar first (n='+a.length+')', 'B — Vote first (n='+b.length+')'],
+        datasets: [{ label: 'Avg first interaction (s)', data: [avgA ?? 0, avgB ?? 0], backgroundColor: ['rgba(0,255,255,0.55)', 'rgba(255,0,170,0.55)'], borderColor: ['#00ffff', '#ff00aa'], borderWidth: 1 }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#ccc' } },
+          expJoinSemErrorBars: { avgs: [avgA ?? 0, avgB ?? 0], sems: [semA, semB] },
+          tooltip: { callbacks: { afterLabel: ctx => { var s = ctx.dataIndex === 0 ? semA : semB; return s > 0 ? '±' + s.toFixed(2) + 's SEM' : ''; } } }
+        },
+        scales: {
+          x: { ticks: { color: '#aaa' }, grid: { display: false } },
+          y: { beginAtZero: true, title: { display: true, text: 'Seconds', color: '#aaa' }, ticks: { color: '#888', callback: v => v + 's' }, grid: { color: 'rgba(255,255,255,0.07)' } }
+        }
+      }
+    });
+  }
+
+  // ─── CHART: Time to reach each section ───────────────────────────────────
+  var expTimeToSectionChart = null;
+  function renderTimeToSectionChart(data) {
+    var wrap = document.getElementById('exp-time-to-section-chart-wrap');
+    var canvas = document.getElementById('exp-time-to-section-chart');
+    if (!wrap || !canvas || typeof Chart === 'undefined') { if (wrap) wrap.style.display = 'none'; return; }
+    var a = data.filter(r => r.condition === 'A');
+    var b = data.filter(r => r.condition === 'B');
+    function avgMs(arr, key) {
+      var vals = arr.map(x => x[key]).filter(v => v != null && v > 0);
+      return vals.length ? parseFloat((vals.reduce((s, v) => s + v, 0) / vals.length / 1000).toFixed(2)) : 0;
+    }
+    var labels = ['Time to calendar', 'Time to game'];
+    var aVals = [avgMs(a, 'time_to_calendar_ms'), avgMs(a, 'time_to_game_ms')];
+    var bVals = [avgMs(b, 'time_to_calendar_ms'), avgMs(b, 'time_to_game_ms')];
+    if ([...aVals, ...bVals].every(v => v === 0)) { wrap.style.display = 'none'; return; }
+    wrap.style.display = 'block';
+    if (expTimeToSectionChart) expTimeToSectionChart.destroy();
+    expTimeToSectionChart = new Chart(canvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          { label: 'A — Calendar first (n='+a.length+')', data: aVals, backgroundColor: 'rgba(0,255,255,0.5)', borderColor: '#00ffff', borderWidth: 1 },
+          { label: 'B — Vote first (n='+b.length+')', data: bVals, backgroundColor: 'rgba(255,0,170,0.5)', borderColor: '#ff00aa', borderWidth: 1 }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#ccc', boxWidth: 12 } } },
+        scales: {
+          x: { ticks: { color: '#aaa' }, grid: { display: false } },
+          y: { beginAtZero: true, title: { display: true, text: 'Avg seconds', color: '#aaa' }, ticks: { color: '#888', callback: v => v + 's' }, grid: { color: 'rgba(255,255,255,0.07)' } }
+        }
+      }
+    });
+  }
+
+  // ─── CHART: Noticed first ─────────────────────────────────────────────────
+  var expNoticedChart = null;
+  function renderNoticedFirstChart(data) {
+    var wrap = document.getElementById('exp-noticed-chart-wrap');
+    var canvas = document.getElementById('exp-noticed-chart');
+    if (!wrap || !canvas || typeof Chart === 'undefined') { if (wrap) wrap.style.display = 'none'; return; }
+    var withData = data.filter(r => r.noticed_first);
+    if (!withData.length) { wrap.style.display = 'none'; return; }
+    var a = withData.filter(r => r.condition === 'A');
+    var b = withData.filter(r => r.condition === 'B');
+    var allValues = [...new Set(withData.map(r => r.noticed_first))].sort();
+    var palette = ['rgba(0,255,200,0.7)', 'rgba(255,180,0,0.7)', 'rgba(140,80,255,0.7)', 'rgba(255,80,80,0.7)', 'rgba(0,180,255,0.7)'];
+    var borderPalette = ['#00ffc8', '#ffb400', '#8c50ff', '#ff5050', '#00b4ff'];
+    var datasets = allValues.map((val, i) => ({
+      label: val,
+      data: [a.filter(r => r.noticed_first === val).length, b.filter(r => r.noticed_first === val).length],
+      backgroundColor: palette[i % palette.length],
+      borderColor: borderPalette[i % borderPalette.length],
+      borderWidth: 1, stack: 'noticed'
+    }));
+    wrap.style.display = 'block';
+    if (expNoticedChart) expNoticedChart.destroy();
+    expNoticedChart = new Chart(canvas.getContext('2d'), {
+      type: 'bar',
+      data: { labels: ['A — Calendar first (n='+a.length+')', 'B — Vote first (n='+b.length+')'], datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#ccc', boxWidth: 12 } } },
+        scales: {
+          x: { stacked: true, ticks: { color: '#aaa' }, grid: { display: false } },
+          y: { stacked: true, beginAtZero: true, ticks: { color: '#888', stepSize: 1 }, title: { display: true, text: 'Respondents', color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.07)' } }
+        }
+      }
+    });
+  }
+
+  // ─── CHART: Click count vs time to join ──────────────────────────────────
+  var expClicksTimeChart = null;
+  function renderClicksTimeChart(data) {
+    var wrap = document.getElementById('exp-clicks-time-chart-wrap');
+    var canvas = document.getElementById('exp-clicks-time-chart');
+    if (!wrap || !canvas || typeof Chart === 'undefined') { if (wrap) wrap.style.display = 'none'; return; }
+    var rows = data.filter(r => r.time_to_join_ms != null && r.click_count != null);
+    if (!rows.length) { wrap.style.display = 'none'; return; }
+    var aData = rows.filter(r => r.condition === 'A').map(r => ({ x: r.click_count, y: r.time_to_join_ms / 1000, id: r.id }));
+    var bData = rows.filter(r => r.condition === 'B').map(r => ({ x: r.click_count, y: r.time_to_join_ms / 1000, id: r.id }));
+    wrap.style.display = 'block';
+    if (expClicksTimeChart) expClicksTimeChart.destroy();
+    expClicksTimeChart = new Chart(canvas.getContext('2d'), {
+      type: 'scatter',
+      data: {
+        datasets: [
+          { label: 'A — Calendar first', data: aData, backgroundColor: 'rgba(0,255,255,0.65)', borderColor: '#00ffff', borderWidth: 1, pointRadius: 6, pointHoverRadius: 8 },
+          { label: 'B — Vote first', data: bData, backgroundColor: 'rgba(255,0,170,0.65)', borderColor: '#ff00aa', borderWidth: 1, pointRadius: 6, pointHoverRadius: 8 }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#ccc', boxWidth: 12 } },
+          tooltip: { callbacks: { label: ctx => '#' + ctx.raw.id + ' · ' + ctx.raw.x + ' clicks · ' + ctx.raw.y.toFixed(1) + 's' } }
+        },
+        scales: {
+          x: { beginAtZero: true, title: { display: true, text: 'Click count', color: '#aaa' }, ticks: { color: '#888' }, grid: { color: 'rgba(255,255,255,0.07)' } },
+          y: { beginAtZero: true, title: { display: true, text: 'Seconds to join', color: '#aaa' }, ticks: { color: '#888', callback: v => v + 's' }, grid: { color: 'rgba(255,255,255,0.07)' } }
+        }
+      }
+    });
   }
 
   loadExpResults();
