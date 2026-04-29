@@ -44,6 +44,21 @@ def _collect_availability_keys():
     return availability_keys
 
 
+def _collect_joined_keys():
+    """Unique users who joined someone else's session as a non-host participant."""
+    joined_keys = set()
+    exp_session_ids = {
+        s.id for s in Session.query.filter_by(title='__experiment__').all()
+    }
+    for p in Participant.query.all():
+        if p.session_id in exp_session_ids:
+            continue
+        session = db.session.get(Session, p.session_id)
+        if session and session.host_id != p.id:
+            joined_keys.add(_unique_key(p))
+    return joined_keys
+
+
 def _collect_activated_keys():
     activated_keys = set()
 
@@ -57,14 +72,21 @@ def _collect_activated_keys():
         if p:
             activated_keys.add(_unique_key(p))
 
-    # Non-host participants: joined a session (any session except __experiment__)
+    # Non-host participants: joined a real session OR completed experiment join flow
     exp_session_ids = {
         s.id for s in Session.query.filter_by(title="__experiment__").all()
     }
     for p in Participant.query.all():
         if p.session_id in exp_session_ids:
+            # Count experiment participants who actually completed the join flow
+            from website.models import ExperimentResult
+            result = ExperimentResult.query.filter_by(
+                participant_id=p.id, joined=True
+            ).first()
+            if result:
+                activated_keys.add(_unique_key(p))
             continue
-        # Any participant who is not the host is someone who joined
+        # Any non-host participant in a real session
         session = db.session.get(Session, p.session_id)
         if session and session.host_id != p.id:
             activated_keys.add(_unique_key(p))
@@ -117,7 +139,7 @@ def _collect_repeat_usage(all_participants, unique_joined):
             if prev[1] == curr[1] and prev[0] == curr[0]:
                 continue
 
-            if timedelta(days=1) <= (curr[0] - prev[0]) <= timedelta(days=7):
+            if timedelta(days=1) <= (curr[0] - prev[0]) <= timedelta(days=30):
                 repeat_count += 1
                 break
 
@@ -183,8 +205,22 @@ def _confirmation_breakdown():
 def calculate_metrics():
     """Return dashboard metrics dict."""
     try:
+        from website.models import ExperimentResult
         all_participants = Participant.query.all()
-        unique_joined = len({_unique_key(p) for p in all_participants})
+        # Count unique real participants
+        real_keys = {_unique_key(p) for p in all_participants}
+        # Also count experiment completers by participant_id (they are Participant rows too)
+        # but deduplicate against real keys using email/id
+        exp_participant_ids = {
+            r.participant_id for r in ExperimentResult.query.filter_by(joined=True).all()
+            if r.participant_id is not None
+        }
+        exp_keys = set()
+        for pid in exp_participant_ids:
+            p = db.session.get(Participant, pid)
+            if p:
+                exp_keys.add(_unique_key(p))
+        unique_joined = len(real_keys | exp_keys)
     except SQLAlchemyError:
         all_participants = []
         unique_joined = 0
@@ -258,9 +294,32 @@ def calculate_metrics():
     except SQLAlchemyError:
         confirmation_breakdown = {"Yes": 0, "Maybe": 0, "No": 0}
 
+    try:
+        joined_keys = _collect_joined_keys()
+        joined_count = len(joined_keys)
+        join_rate = round(joined_count / unique_joined * 100, 1) if unique_joined else 0
+    except SQLAlchemyError:
+        joined_count = 0
+        join_rate = 0
+
+    # Solo sessions: sessions with only the host (no one joined)
+    try:
+        solo_sessions = sum(
+            1 for s in all_sessions
+            if Participant.query.filter_by(session_id=s.id).count() <= 1
+        )
+        solo_session_rate = round(solo_sessions / total_sessions * 100, 1) if total_sessions else 0
+    except SQLAlchemyError:
+        solo_sessions = 0
+        solo_session_rate = 0
+
     return {
         "total_users": unique_joined,
+        "users_joined_session": joined_count,
+        "user_join_rate": f"{join_rate}%",
         "sessions_created": total_sessions,
+        "solo_sessions": solo_sessions,
+        "solo_session_rate": f"{solo_session_rate}%",
         "confirmed_participants": confirmed_count,
         "availability_only_participants": availability_only_count,
         "activation_rate": f"{activation_rate}%",

@@ -42,7 +42,7 @@
       <div class="stat-card purple">
         <div class="stat-label">Repeat usage</div>
         <div class="stat-value">{{ metrics.repeat_usage }}</div>
-        <div class="stat-hint">% who returned within 7 days</div>
+        <div class="stat-hint">% who returned within 30 days</div>
       </div>
     </div>
   </div>
@@ -60,9 +60,16 @@
     </div>
     <div class="col-md-3">
       <div class="stat-card teal">
-        <div class="stat-label">Groups with &gt;1 participant</div>
-        <div class="stat-value">{{ metrics.multi_participant_rate }}</div>
-        <div class="stat-hint">Sessions someone actually joined</div>
+        <div class="stat-label">Solo sessions</div>
+        <div class="stat-value">{{ metrics.solo_sessions }} <span style="font-size:0.55em;opacity:0.6">({{ metrics.solo_session_rate }})</span></div>
+        <div class="stat-hint">Sessions with no one joining the host</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="stat-card cyan">
+        <div class="stat-label">Users who joined a session</div>
+        <div class="stat-value">{{ metrics.users_joined_session }} <span style="font-size:0.55em;opacity:0.6">({{ metrics.user_join_rate }})</span></div>
+        <div class="stat-hint">% of unique users who joined as non-host</div>
       </div>
     </div>
     <div class="col-md-3">
@@ -89,7 +96,7 @@
       <div class="stat-card orange">
         <div class="stat-label">Activation rate</div>
         <div class="stat-value">{{ metrics.activation_rate }}</div>
-        <div class="stat-hint">% who hosted, joined, or confirmed ≥1 session</div>
+        <div class="stat-hint">% who hosted, joined, confirmed, or completed experiment</div>
       </div>
     </div>
     <div class="col-md-4">
