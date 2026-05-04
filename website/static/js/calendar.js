@@ -337,6 +337,24 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 return;
             }
+            // UNAUTHENTICATED FLOW — blocks are local only, just update tempBlocks
+            if (!token) {
+                var oldStart = info.oldEvent.extendedProps.startStr || info.oldEvent.startStr.slice(0, 19);
+                var oldEnd   = info.oldEvent.extendedProps.endStr   || info.oldEvent.endStr.slice(0, 19);
+                var dropNewStart = info.event.startStr.slice(0, 19);
+                var dropNewEnd   = info.event.endStr.slice(0, 19);
+
+                window.tempBlocks = window.tempBlocks.map(function(b) {
+                    if (b.start === oldStart && b.end === oldEnd) {
+                        return { start: dropNewStart, end: dropNewEnd };
+                    }
+                    return b;
+                });
+
+                info.event.setExtendedProp('startStr', dropNewStart);
+                info.event.setExtendedProp('endStr', dropNewEnd);
+                return;
+            }
 
             if (!window.isExperiment) {
                 if (info.event.title !== myName && info.event.title !== window.squadScheduleMyName) {
@@ -429,6 +447,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 .catch(function() {
                     info.revert();
                 });
+                console.log('remove URL:', '/session/' + sessionHash + '/remove_availability');
+                console.log('oldStart:', oldStart, 'oldEnd:', oldEnd);
         },
     });
 
@@ -531,5 +551,5 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         });
     }
-
+    window.rebuildCalendar = rebuildCalendar;
 });
