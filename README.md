@@ -47,7 +47,7 @@ Key libraries:
 1. Clone the repository:
 
 ```bash
-git clone <repo-url> synq
+git clone https://github.com/NotSMX/SYNQ synq
 cd synq
 ```
 
